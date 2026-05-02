@@ -258,10 +258,12 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           <div className="mt-8 pt-6 border-t border-gray-100">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 text-center">Demo Giriş Bilgileri</p>
             <div className="grid grid-cols-2 gap-2 text-[10px] font-medium text-gray-500">
-              <div className="bg-gray-50 p-2 rounded border border-gray-100">Öğrenci: <span className="text-gray-900">12345678901</span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100">Admin: <span className="text-gray-900">98765432109</span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100">YDYO: <span className="text-gray-900">11111111111</span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100">YGK: <span className="text-gray-900">22222222222</span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Öğrenci: <span className="text-gray-900">12345678901</span></span><span>Şifre: <span className="text-gray-900">student123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Admin: <span className="text-gray-900">98765432109</span></span><span>Şifre: <span className="text-gray-900">admin123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YDYO: <span className="text-gray-900">11111111111</span></span><span>Şifre: <span className="text-gray-900">ydyo123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YGK: <span className="text-gray-900">22222222222</span></span><span>Şifre: <span className="text-gray-900">ygk123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Dekan: <span className="text-gray-900">33333333333</span></span><span>Şifre: <span className="text-gray-900">dean123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Kurul: <span className="text-gray-900">44444444444</span></span><span>Şifre: <span className="text-gray-900">board123</span></span></div>
             </div>
           </div>
         </div>
