@@ -29,6 +29,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src/app'),
     },
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     // Output to `build` so Vercel detects the directory after build
     outDir: 'build',

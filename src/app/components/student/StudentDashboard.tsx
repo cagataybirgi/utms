@@ -18,6 +18,7 @@ import {
 import type { User } from '../../App';
 import { ApplicationForm } from './ApplicationForm';
 import { DocumentUpload } from './DocumentUpload';
+import { createApplication } from '../../lib/api/document-upload';
 import { ApplicationTimeline } from './ApplicationTimeline';
 import { FinalResult } from './FinalResult';
 import { AppealForm } from './AppealForm';
@@ -68,11 +69,31 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
   const [currentSection, setCurrentSection] = useState<Section>('dashboard');
   const [currentView, setCurrentView] = useState<StudentView>('dashboard');
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
-  const [applicationData, setApplicationData] = useState<any>(null);
+  const [activeApplicationId, setActiveApplicationId] = useState<string | null>(null);
+  const [applicationError, setApplicationError] = useState<string | null>(null);
+  const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
 
-  const handleFormSave = (data: any) => {
-    setApplicationData(data);
-    setCurrentView('upload-documents');
+  const handleFormSave = async (data: any) => {
+    setApplicationError(null);
+    setIsSubmittingApplication(true);
+    try {
+      const { applicationId } = await createApplication(user.id, {
+        studentTckn: data.tckn ?? '00000000000',
+        studentFullName: `${data.name ?? ''} ${data.surname ?? ''}`.trim() || user.name,
+        targetDepartmentId: (data.targetProgram ?? 'unknown').toLowerCase().replace(/\s+/g, '-'),
+        targetSemester: Number(data.targetSemester ?? 3),
+        submittedGpa: Number(data.gpa ?? 0),
+        submittedYksScore: data.osymScore ? Number(data.osymScore) : undefined,
+        currentInstitution: data.currentUniversity,
+        currentDepartment: data.currentProgram,
+      });
+      setActiveApplicationId(applicationId);
+      setCurrentView('upload-documents');
+    } catch (e) {
+      setApplicationError(e instanceof Error ? e.message : 'Başvuru oluşturulamadı. Lütfen tekrar deneyin.');
+    } finally {
+      setIsSubmittingApplication(false);
+    }
   };
 
   const getStatusConfig = (status: string) => {
@@ -104,6 +125,12 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
             <ArrowLeft className="w-4 h-4 mr-2" />
             Geri Dön
           </Button>
+          {applicationError && (
+            <div className="flex items-center gap-2 p-4 rounded-md bg-red-50 border border-red-200 text-red-700 text-sm">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {applicationError}
+            </div>
+          )}
           <ApplicationForm
             onSave={handleFormSave}
             onCancel={() => setCurrentView('dashboard')}
@@ -120,8 +147,8 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
             Geri Dön
           </Button>
           <DocumentUpload
-            applicationId="APP-2025-NEW"
-            applicationData={applicationData}
+            applicationId={activeApplicationId ?? ''}
+            userId={user.id}
             onComplete={() => setCurrentView('dashboard')}
             onBack={() => setCurrentView('new-application')}
           />

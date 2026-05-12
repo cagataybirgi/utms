@@ -1,5 +1,7 @@
-<<<<<<< HEAD
-node_modules
-=======
 node_modules/
->>>>>>> d99c39d51910649422b56bb6ed7e43bd506e76f7
+backend/dist/
+.claude/settings.local.json
+DesignDocuments/Group1_SDD_Updated (1) (4).pdf
+DesignDocuments/Group02_TestReportV1.docx .docx (1).pdf
+DesignDocuments/SRS_Group1_kısa3 (1) (1).pdf
+backend/.env

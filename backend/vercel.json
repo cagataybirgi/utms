@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "buildCommand": "npx prisma generate && npx prisma db push --accept-data-loss",
+  "installCommand": "npm install",
+  "framework": null,
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+}

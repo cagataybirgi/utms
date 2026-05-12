@@ -1,0 +1,290 @@
+// UTMS — Prisma schema matching the project SQL definition.
+// IDs use UUID strings instead of SERIAL integers so service/controller code does not need changes.
+// Audit_Log.session_id is nullable because mock-auth has no session tracking.
+// DocumentVersion is an extension of Documents to support SDD DE-04 version history.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-1.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── 1. ORGANIZATIONS & USERS ─────────────────────────────────────────────────
+
+model Organization {
+  organizationId String @id @default(uuid()) @map("organization_id")
+  name           String @map("name") @db.VarChar(255)
+
+  users User[]
+
+  @@map("organizations")
+}
+
+model User {
+  userId           String    @id @default(uuid()) @map("user_id")
+  organizationId   String?   @map("organization_id")
+  fullName         String    @map("full_name") @db.VarChar(100)
+  phoneNum         String[]  @map("phone_num")
+  email            String    @unique @db.VarChar(100)
+  tckn             String    @unique @db.VarChar(11)
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
+  // Extended: required for RBAC middleware and scenario logic
+  roles            String[]
+  departmentId     String?   @map("department_id")
+  facultyId        String?   @map("faculty_id")
+
+  organization Organization? @relation(fields: [organizationId], references: [organizationId])
+  student      Student?
+  sessions     SessionLog[]
+  password     Password?
+  resetToken   ResetToken?
+
+  @@map("users")
+}
+
+// ─── 2. AUTHENTICATION & SESSIONS ────────────────────────────────────────────
+
+model Password {
+  userId                 String   @id @map("user_id")
+  passwordHash           String   @map("password_hash")
+  previousPasswordHashes String[] @map("previous_password_hashes")
+  lastChangedAt          DateTime @default(now()) @map("last_changed_at")
+  isTemporary            Boolean  @default(false) @map("is_temporary")
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("passwords")
+}
+
+model ResetToken {
+  // User_ID is PK in the SQL — one active token per user
+  userId String   @id @map("user_id")
+  token  String   @map("reset_token") @db.VarChar(255)
+  expiry DateTime
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("reset_token")
+}
+
+model SessionLog {
+  sessionId     String    @id @default(uuid()) @map("session_id")
+  userId        String    @map("user_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  expiresAt     DateTime? @map("expires_at")
+  sessionStatus String?   @map("session_status") @db.VarChar(50)
+  ipAddress     String?   @map("ip_address") @db.VarChar(45)
+
+  user      User       @relation(fields: [userId], references: [userId])
+  auditLogs AuditLog[]
+
+  @@index([userId])
+  @@map("session_log")
+}
+
+model AuditLog {
+  logId         String   @id @default(uuid()) @map("log_id")
+  // Nullable: SQL says NOT NULL but mock-auth has no session tracking
+  sessionId     String?  @map("session_id")
+  occurredAt    DateTime @default(now()) @map("occured_at")
+  newValue      String?  @map("new_value")
+  previousValue String?  @map("previous_value")
+  // Extended columns for scenario audit trails (OIDB, Intibak, Document Upload)
+  actorUserId        String? @map("actor_user_id")
+  actorRole          String? @map("actor_role")
+  actionType         String? @map("action_type")
+  affectedEntityId   String? @map("affected_entity_id")
+  affectedEntityType String? @map("affected_entity_type")
+
+  // actorUserId stored as plain string — no FK so InMemory user IDs work without Neon users row.
+  session SessionLog? @relation(fields: [sessionId], references: [sessionId])
+
+  @@index([actorUserId])
+  @@index([affectedEntityId, affectedEntityType])
+  @@map("audit_log")
+}
+
+// ─── 3. STUDENT SPECIALIZATION ───────────────────────────────────────────────
+// student_id shares the same value as user_id (SQL: REFERENCES Users(User_ID))
+
+model Student {
+  studentId         String   @id @map("student_id")
+  tckn              String   @unique @db.VarChar(11)
+  fullName          String   @map("full_name") @db.VarChar(100)
+  phoneNum          String[] @map("phone_num")
+  email             String   @db.VarChar(100)
+  yksScore          Float?   @map("yks_score")
+  gpa               Float?
+  yearOfStudy       Int?     @map("year_of_study")
+  currentDepartment String?  @map("current_department") @db.VarChar(100)
+
+  user User @relation(fields: [studentId], references: [userId])
+
+  @@map("student")
+}
+
+// ─── 4. APPLICATION & DEPARTMENTAL LOGIC ─────────────────────────────────────
+
+model DepartmentApplicationInformation {
+  departmentId            String  @id @default(uuid()) @map("department_id")
+  departmentSpecificRules String? @map("department_specific_rules")
+  quotaInformation        Int?    @map("quota_information")
+
+  @@map("department_application_information")
+}
+
+model Application {
+  // SQL base columns
+  applicationId      String    @id @default(uuid()) @map("application_id")
+  studentId          String    @map("student_id")
+  targetDepartmentId String    @map("targeted_department_id")
+  targetedSemester   Int?      @map("targeted_semester")
+  transferScore      Float?    @map("transfer_score")
+  currentStatus      String    @default("PENDING_DOCUMENT_UPLOAD") @map("status") @db.VarChar(50)
+  submittedAt        DateTime  @default(now()) @map("submitted_at")
+  lastModifiedAt     DateTime  @updatedAt @map("last_modified_at")
+  correctionNotes    String[]  @map("correction_notes")
+  // Extended columns required by Scenario 3, 4, and 6
+  studentTckn         String   @map("student_tckn")
+  studentFullName     String   @map("student_full_name")
+  periodId            String   @map("period_id")
+  targetFacultyId     String   @map("target_faculty_id")
+  transferType        String   @map("transfer_type")
+  submittedGpa        Float    @map("submitted_gpa")
+  submittedYksScore   Float?   @map("submitted_yks_score")
+  yksExamYear         Int?     @map("yks_exam_year")
+  language            String?
+  finishedSemester    Int?     @map("finished_semester")
+  finishedYear        Int?     @map("finished_year")
+  currentInstitution  String?  @map("current_institution")
+  currentDepartment   String?  @map("current_department")
+  preScreening        Json     @default("{}") @map("pre_screening")
+  correctionReasons   Json     @default("[]") @map("correction_reasons")
+  rejectionReason     String?  @map("rejection_reason")
+  intakeVerifiedBy    String?  @map("intake_verified_by")
+  intakeVerifiedAt    DateTime? @map("intake_verified_at")
+  routedToYdyo        Boolean  @default(false) @map("routed_to_ydyo")
+  routedToDeansOffice Boolean  @default(false) @map("routed_to_deans_office")
+  ydyoExempt          Boolean  @default(false) @map("ydyo_exempt")
+  rankingCategory     String?  @map("ranking_category")
+
+  // studentId is stored as plain string — no FK to students table so local dev
+  // works without seeding Neon's users/students tables.
+  documents     Document[]
+  appeals       Appeal[]
+  intibakTables IntibakTable[]
+
+  @@index([studentId])
+  @@index([targetDepartmentId])
+  @@index([currentStatus])
+  @@map("applications")
+}
+
+// ─── 5. DOCUMENTS, INTIBAK & APPEALS ─────────────────────────────────────────
+
+model Document {
+  // Matches SQL Documents table
+  documentId    String   @id @default(uuid()) @map("document_id")
+  applicationId String   @map("application_id")
+  fileType      String?  @map("file_type") @db.VarChar(50)
+  fileLocation  String?  @map("file_location") @db.VarChar(255)
+  version       Int      @default(1)
+  status        String?  @db.VarChar(50)
+  uploadedAt    DateTime @default(now()) @map("uploaded_at")
+  // Extended: logical document type slot used by Scenario 3 service
+  documentType  String?  @map("document_type")
+
+  application Application       @relation(fields: [applicationId], references: [applicationId])
+  versions    DocumentVersion[]
+
+  @@unique([applicationId, documentType])
+  @@index([applicationId])
+  @@map("documents")
+}
+
+// Extension of Documents — stores each physical upload as a separate row (SDD DE-04)
+model DocumentVersion {
+  versionId            String   @id @default(uuid()) @map("version_id")
+  documentId           String   @map("document_id")
+  standardizedFileName String   @map("standardized_file_name")
+  storageKey           String   @map("storage_key")
+  uploadedAt           DateTime @default(now()) @map("uploaded_at")
+  versionNumber        Int      @map("version_number")
+  isActive             Boolean  @default(true) @map("is_active")
+  uploadedBy           String   @map("uploaded_by")
+  hasBarcode           Boolean  @default(false) @map("has_barcode")
+  isCorrupt            Boolean  @default(false) @map("is_corrupt")
+
+  // uploadedBy stores the userId string — no FK so InMemory user IDs work without a Neon users row.
+  document Document @relation(fields: [documentId], references: [documentId])
+
+  @@index([documentId])
+  @@map("document_versions")
+}
+
+model IntibakTable {
+  // SQL base: Intibak_ID, Application_ID, Old_Course, New_Course, ECTS
+  intibakTableId    String  @id @default(uuid()) @map("intibak_table_id")
+  applicationId     String  @map("application_id")
+  oldCourse         String? @map("old_course") @db.VarChar(100)
+  newCourse         String? @map("new_course") @db.VarChar(100)
+  ects              Int?
+  // Extended columns for Scenario 6 (Intibak preparation)
+  previousCourses    Json     @default("[]") @map("previous_courses")
+  targetCurriculum   Json     @default("[]") @map("target_curriculum")
+  mappings           Json     @default("[]")
+  manualEntryUsed    Boolean  @default(false) @map("manual_entry_used")
+  noSuggestionsFound Boolean  @default(false) @map("no_suggestions_found")
+  isLocked           Boolean  @default(false) @map("is_locked")
+  createdBy          String   @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  savedAt            DateTime? @map("saved_at")
+
+  application Application @relation(fields: [applicationId], references: [applicationId])
+
+  @@index([applicationId])
+  @@map("intibak_tables")
+}
+
+model Appeal {
+  appealId           String    @id @default(uuid()) @map("appeal_id")
+  applicationId      String    @map("application_id")
+  appealStatus       String?   @map("appeal_status") @db.VarChar(50)
+  submittedAt        DateTime  @default(now()) @map("submitted_at")
+  deadlineExpiresAt  DateTime? @map("deadline_expires_at")
+  consultationTarget String?   @map("consultation_target") @db.VarChar(100)
+  decisionType       String?   @map("decision_type") @db.VarChar(50)
+  decisionRationale  String?   @map("decision_rationale")
+  resolvedAt         DateTime? @map("resolved_at")
+  decidedByUserId    String?   @map("decided_by_user_id")
+
+  application Application @relation(fields: [applicationId], references: [applicationId])
+
+  @@index([applicationId])
+  @@map("appeals")
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
+// Not in the SQL schema but used by OIDB and Intibak notification logic.
+
+model NotificationRecord {
+  notificationId  String   @id @default(uuid()) @map("notification_id")
+  recipientUserId String   @map("recipient_user_id")
+  eventType       String   @map("event_type")
+  channel         String
+  subject         String
+  body            String
+  isDelivered     Boolean  @default(false) @map("is_delivered")
+  failureReason   String?  @map("failure_reason")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // recipientUserId stored as plain string — no FK so InMemory user IDs work without Neon users row.
+
+  @@index([recipientUserId])
+  @@map("notification_records")
+}

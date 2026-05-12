@@ -12,7 +12,7 @@ const MOCK_USERS: Record<string, { password: string; user: User }> = {
   '12345678901': {
     password: 'student123',
     user: {
-      id: '1',
+      id: 'student-ahmet-yilmaz', // matches backend seed userId
       tckn: '12345678901',
       name: 'Ahmet',
       surname: 'Yılmaz',
@@ -32,47 +32,47 @@ const MOCK_USERS: Record<string, { password: string; user: User }> = {
     }
   },
   '11111111111': {
-    password: 'ydyo123',
+    password: 'oidb123',
     user: {
-      id: '3',
+      id: 'user-oidb-1', // matches backend seed userId
       tckn: '11111111111',
-      name: 'Ayşe',
-      surname: 'Kaya',
-      roles: ['YDYO'],
-      email: 'ayse.kaya@ydyo.edu.tr'
+      name: 'Ahmet Mete',
+      surname: 'Yazıcı',
+      roles: ['OIDB'],
+      email: 'oidb1@iyte.edu.tr'
     }
   },
   '22222222222': {
     password: 'ygk123',
     user: {
-      id: '4',
+      id: 'user-ygk-cmpe-1', // matches backend seed userId
       tckn: '22222222222',
-      name: 'Fatma',
-      surname: 'Şahin',
+      name: 'Melih',
+      surname: 'Macit',
       roles: ['YGK'],
-      email: 'fatma.sahin@ygk.edu.tr'
+      email: 'ygk-cmpe@iyte.edu.tr'
     }
   },
   '33333333333': {
-    password: 'dean123',
+    password: 'ygkchair123',
     user: {
-      id: '5',
+      id: 'user-ygk-chair-cmpe', // matches backend seed userId
       tckn: '33333333333',
-      name: 'Ali',
-      surname: 'Öztürk',
-      roles: ['Dean'],
-      email: 'ali.ozturk@dean.edu.tr'
+      name: 'YGK',
+      surname: 'Chair',
+      roles: ['YGK'],
+      email: 'ygk-chair-cmpe@iyte.edu.tr'
     }
   },
   '44444444444': {
-    password: 'board123',
+    password: 'dean123',
     user: {
-      id: '6',
+      id: 'user-deans-eng', // matches backend seed userId
       tckn: '44444444444',
-      name: 'Zeynep',
-      surname: 'Yıldız',
-      roles: ['Board'],
-      email: 'zeynep.yildiz@board.edu.tr'
+      name: 'Deans',
+      surname: 'Office',
+      roles: ['Dean'],
+      email: 'deans-eng@iyte.edu.tr'
     }
   }
 };
@@ -259,11 +259,10 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 text-center">Demo Giriş Bilgileri</p>
             <div className="grid grid-cols-2 gap-2 text-[10px] font-medium text-gray-500">
               <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Öğrenci: <span className="text-gray-900">12345678901</span></span><span>Şifre: <span className="text-gray-900">student123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Admin: <span className="text-gray-900">98765432109</span></span><span>Şifre: <span className="text-gray-900">admin123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YDYO: <span className="text-gray-900">11111111111</span></span><span>Şifre: <span className="text-gray-900">ydyo123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>ÖİDB: <span className="text-gray-900">11111111111</span></span><span>Şifre: <span className="text-gray-900">oidb123</span></span></div>
               <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YGK: <span className="text-gray-900">22222222222</span></span><span>Şifre: <span className="text-gray-900">ygk123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Dekan: <span className="text-gray-900">33333333333</span></span><span>Şifre: <span className="text-gray-900">dean123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Kurul: <span className="text-gray-900">44444444444</span></span><span>Şifre: <span className="text-gray-900">board123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YGK Başkanı: <span className="text-gray-900">33333333333</span></span><span>Şifre: <span className="text-gray-900">ygkchair123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Dekanlık: <span className="text-gray-900">44444444444</span></span><span>Şifre: <span className="text-gray-900">dean123</span></span></div>
             </div>
           </div>
         </div>

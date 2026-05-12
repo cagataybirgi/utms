@@ -1,0 +1,7 @@
+{
+  "buildCommand": "pnpm build && cd backend && ./node_modules/.bin/prisma generate && ./node_modules/.bin/tsc -p tsconfig.json && ./node_modules/.bin/prisma db push --accept-data-loss",
+  "outputDirectory": "build",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index" }
+  ]
+}
