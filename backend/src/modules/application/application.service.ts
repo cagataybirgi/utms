@@ -27,7 +27,7 @@ export class ApplicationService {
         targetDepartmentId: dto.targetDepartmentId,
         targetFacultyId: dto.targetFacultyId,
         transferType: dto.transferType,
-        targetSemester: dto.targetSemester,
+        targetedSemester: dto.targetSemester,
         submittedGpa: dto.submittedGpa,
         submittedYksScore: dto.submittedYksScore,
         yksExamYear: dto.yksExamYear,

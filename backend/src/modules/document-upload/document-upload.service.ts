@@ -188,7 +188,7 @@ export class DocumentUploadService {
         name: meta.name,
         description: meta.description,
         required: meta.required,
-        currentStatus: doc?.currentStatus ?? "PENDING",
+        currentStatus: doc?.status ?? "PENDING",
         activeVersion: activeVersion
           ? {
               versionId: activeVersion.versionId,
@@ -267,7 +267,7 @@ export class DocumentUploadService {
           data: {
             applicationId,
             documentType,
-            currentStatus: "UPLOADED",
+            status: "UPLOADED",
           },
         });
       } else {
@@ -278,7 +278,7 @@ export class DocumentUploadService {
         });
         await tx.document.update({
           where: { documentId: document.documentId },
-          data: { currentStatus: "UPLOADED" },
+          data: { status: "UPLOADED" },
         });
       }
 
@@ -376,8 +376,8 @@ export class DocumentUploadService {
           actionType: "DOCUMENT_UPLOAD_SUBMIT",
           affectedEntityId: applicationId,
           affectedEntityType: "Application",
-          previousValue: { status: application.currentStatus },
-          newValue: { status: ApplicationStatus.PendingOidbVerification },
+          previousValue: JSON.stringify({ status: application.currentStatus }),
+          newValue: JSON.stringify({ status: ApplicationStatus.PendingOidbVerification }),
         },
       }),
     ]);
