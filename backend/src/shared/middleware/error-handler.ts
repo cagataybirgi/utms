@@ -17,9 +17,11 @@ export function errorHandler(
     return;
   }
   if (err instanceof ZodError) {
+    // Extract field names for better error messages
+    const fieldErrors = err.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Invalid request body",
+      message: fieldErrors || "Invalid request body",
       details: err.errors,
     });
     return;

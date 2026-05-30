@@ -6,6 +6,7 @@ import { buildOidbRouter } from "./modules/oidb/oidb.routes";
 import { buildIntibakRouter } from "./modules/intibak/intibak.routes";
 import { buildDocumentUploadRouter } from "./modules/document-upload/document-upload.routes";
 import { buildApplicationRouter } from "./modules/application/application.routes";
+import { buildRankingRouter } from "./modules/ranking/ranking.routes";
 
 export interface CreateAppOptions {
   container?: AppContainer;
@@ -29,13 +30,14 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.use(express.json({ limit: "12mb" }));
 
   app.get("/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", scope: "Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 6 (Intibak)" });
+    res.json({ status: "ok", scope: "Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 5 (Ranking) & Scenario 6 (Intibak)" });
   });
 
   const auth = mockAuthMiddleware(container);
   app.use("/api/applications", auth, buildApplicationRouter());
   app.use("/api/documents", auth, buildDocumentUploadRouter());
   app.use("/api/oidb", auth, buildOidbRouter(container));
+  app.use("/api/ranking", auth, buildRankingRouter(container));
   app.use("/api/ygk", auth, buildIntibakRouter(container));
 
   app.use((_req: Request, res: Response) => {

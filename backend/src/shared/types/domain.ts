@@ -81,6 +81,7 @@ export interface Application {
   routedToDeansOffice: boolean;
   ydyoExempt: boolean;
   rankingCategory?: RankingCategory;
+  transferScore?: number;
   intibakTableId?: string;
   submittedAt: string;
   lastModifiedAt: string;

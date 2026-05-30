@@ -65,6 +65,13 @@ function seedUsers(c: AppContainer): void {
       facultyId: FACULTY_ENG,
     },
     {
+      userId: "user-admin",
+      tckn: "99999999999",
+      fullName: "System Administrator",
+      email: "admin@iyte.edu.tr",
+      roles: [UserRole.SystemAdmin],
+    },
+    {
       userId: "student-ahmet-yilmaz",
       tckn: "12345678901",
       fullName: "Ahmet Yilmaz",

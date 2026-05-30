@@ -1,8 +1,8 @@
-# UTMS Backend — Senaryo 4 & Senaryo 6
+# UTMS Backend — Senaryo 4, 5 & 6
 
 > Owner: **Melih Macit (300201088)** · Branch: `melih`
 >
-> Bu klasör, Undergraduate Transfer Management System (UTMS) projesinin **Senaryo 4 (ÖİDB Review)** ve **Senaryo 6 (Intibak Preparation)** kullanım senaryolarına ait backend implementasyonudur. Diğer senaryoların backend'i ekibin diğer üyeleri tarafından eklenecektir.
+> Bu klasör, Undergraduate Transfer Management System (UTMS) projesinin **Senaryo 4 (ÖİDB Review)**, **Senaryo 5 (YGK Ranking)** ve **Senaryo 6 (Intibak Preparation)** kullanım senaryolarına ait backend implementasyonudur. Diğer senaryoların backend'i ekibin diğer üyeleri tarafından eklenecektir.
 >
 > **Repo durumu**: Frontend (Vite + React + shadcn/ui) repo kökünde (`src/app/`); backend bu klasörde (`backend/`). pnpm workspace olarak iki paket bir arada yönetilir (root `pnpm-workspace.yaml`).
 
@@ -33,6 +33,9 @@ backend/
 │   │   │   ├── oidb.service.ts   # Domain mantığı (verify, return, reject, forward)
 │   │   │   ├── oidb.controller.ts
 │   │   │   └── oidb.routes.ts
+│   │   ├── ranking/              # Senaryo 5
+│   │   │   ├── ranking.service.ts        # eligibility, score calculation, ranking
+│   │   │   └── ranking.routes.ts
 │   │   └── intibak/              # Senaryo 6
 │   │       ├── intibak.service.ts        # prepare, mappings, save, package send
 │   │       ├── intibak.controller.ts
@@ -52,6 +55,7 @@ backend/
 │       └── seed-data.ts                  # Test fixture'ları
 ├── tests/
 │   ├── oidb/                             # Senaryo 4 test case'leri
+│   ├── ranking/                          # Senaryo 5 test case'leri (5A → 5J)
 │   └── intibak/                          # Senaryo 6 test case'leri (6A → 6J)
 ├── package.json
 ├── tsconfig.json
@@ -117,6 +121,33 @@ DB sorumlusu hazır olduğunda yalnızca **Repositories** kutusu PostgreSQL adap
 | `POST` | `/api/oidb/applications/:id/forward` | OIDB-Main |
 
 **SDD Eşlemesi**: DC-03 (status state machine), DC-07 (e-Devlet adapter), DC-10 (audit + notification decoupling), DC-13 (security).
+
+### Senaryo 5 — YGK Ranking (SRS UC-3.1)
+YGK Chair'in INTAKE_VERIFIED durumundaki başvuruları akademik uygunluk kriterlerine göre değerlendirip, transfer puanı hesaplayarak sıraladığı ve ASIL/YEDEK/RED kategorilerine ayırdığı akış.
+
+**Endpoint'ler** (`requireRoles(YgkChair, SystemAdmin)` for execute; `YgkMember+` for read):
+
+| Method | Path | Test Case |
+|---|---|---|
+| `POST` | `/api/ranking/execute` | 5A, 5B, 5C, 5D, 5E, 5F, 5G, 5H, 5I, 5J |
+| `GET`  | `/api/ranking/:departmentId/:periodId/results` | 5A |
+| `GET`  | `/api/ranking/:departmentId/:periodId/overview` | 5A |
+
+**Transfer Score Formula** (SRS): `Score = (YKS / 500 * 0.90) + (GPA * 0.10)`
+
+**Eligibility Criteria**:
+- Minimum GPA ≥ 2.5 / 4.0
+- Valid semester: 3rd or 5th only
+- YKS exam year ≥ 2022
+
+**Ranking Categories**:
+- **ASIL**: Top N (N = quota)
+- **YEDEK**: Next 20% of quota
+- **RED**: Below cutoff or ineligible
+
+**Tie-breaking**: Earlier submission time wins for identical scores.
+
+**SDD Eşlemesi**: DC-03 (status transitions), DC-10 (audit logging), DC-13 (role-based access).
 
 ### Senaryo 6 — Intibak Preparation (SRS UC-4.5, UC-4.8)
 YGK Member'ın Asil-ranked öğrenciler için ders denkleştirme tablosu hazırladığı, YGK Chair'in paketi imzalayıp Dean's Office'e ilettiği akış.
@@ -199,6 +230,20 @@ Testler `npm test` ile çalıştırılır; her test SRS / Test Report'taki bir t
 | OIDB-Return Without Reason | `tests/oidb/oidb-return-without-reason.test.ts` | ✅ Pass |
 | OIDB-Notification Service Failure | `tests/oidb/oidb-notification-failure.test.ts` | ✅ Pass |
 
+### Senaryo 5 — YGK Ranking
+| Test Case | Test Dosyası | Test Sonucu |
+|---|---|---|
+| 5A — Happy Path (Full Ranking) | `tests/ranking/5a-happy-path.test.ts` | ✅ Pass |
+| 5B — Ineligible: Low GPA | `tests/ranking/5b-ineligible-low-gpa.test.ts` | ✅ Pass |
+| 5C — Ineligible: Invalid Semester | `tests/ranking/5c-ineligible-invalid-semester.test.ts` | ✅ Pass |
+| 5D — Ineligible: Expired YKS | `tests/ranking/5d-ineligible-expired-yks.test.ts` | ✅ Pass |
+| 5E — Tie-Breaking Logic | `tests/ranking/5e-tie-breaking.test.ts` | ✅ Pass |
+| 5F — Zero Eligible Applicants | `tests/ranking/5f-zero-eligible.test.ts` | ✅ Pass |
+| 5G — Applicants Less Than Quota | `tests/ranking/5g-less-than-quota.test.ts` | ✅ Pass |
+| 5H — Unauthorized Access | `tests/ranking/5h-unauthorized-access.test.ts` | ✅ Pass |
+| 5I — Validation Errors | `tests/ranking/5i-validation-errors.test.ts` | ✅ Pass |
+| 5J — Audit Logging | `tests/ranking/5j-audit-logging.test.ts` | ✅ Pass |
+
 ### Senaryo 6 — Intibak Preparation
 | Test Case | Test Dosyası | Test Sonucu |
 |---|---|---|
@@ -213,7 +258,7 @@ Testler `npm test` ile çalıştırılır; her test SRS / Test Report'taki bir t
 | 6I — Successful Package Export | `tests/intibak/6i-package-export-success.test.ts` | ✅ Pass |
 | 6J — Package Export Blocked | `tests/intibak/6j-package-export-blocked.test.ts` | ✅ Pass |
 
-**Toplam**: 23 test, 23 pass.
+**Toplam**: 33 test (6 OIDB + 10 Ranking + 17 Intibak), 33 pass.
 
 ---
 
