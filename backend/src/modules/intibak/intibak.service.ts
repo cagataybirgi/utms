@@ -20,7 +20,7 @@ import {
   ValidationError,
 } from "../../shared/errors";
 import {
-  IApplicationRepository,
+  IAsyncApplicationRepository,
   ICurriculumRepository,
   IDocumentRepository,
   IIntibakRepository,
@@ -31,7 +31,7 @@ import { AuditLogger } from "../../shared/audit";
 import { SuggestionEngine } from "./suggestion-engine";
 
 export interface IntibakServiceDeps {
-  applications: IApplicationRepository;
+  applications: IAsyncApplicationRepository;
   documents: IDocumentRepository;
   intibakTables: IIntibakRepository;
   curriculum: ICurriculumRepository;
@@ -74,6 +74,25 @@ export interface DepartmentOverviewDto {
   ready: boolean;
 }
 
+export interface IntibakCandidateDto {
+  applicationId: string;
+  studentFullName: string;
+  studentTckn: string;
+  rankingCategory: RankingCategory | null;
+  currentStatus: ApplicationStatus;
+  intibakStarted: boolean;
+  intibakCompleted: boolean;
+}
+
+export interface IntibakCandidatesDto {
+  departmentId: string;
+  periodId: string;
+  candidates: IntibakCandidateDto[];
+  asilTotal: number;
+  asilCompleted: number;
+  ready: boolean;
+}
+
 export interface SendPackageInput {
   signaturePassword: string;
   departmentId: string;
@@ -89,8 +108,8 @@ export class IntibakService {
     this.suggestions = deps.suggestions ?? new SuggestionEngine();
   }
 
-  prepare(applicationId: string, actorUserId: string): IntibakInterfaceDto {
-    const application = this.requireApp(applicationId);
+  async prepare(applicationId: string, actorUserId: string): Promise<IntibakInterfaceDto> {
+    const application = await this.requireApp(applicationId);
     if (application.rankingCategory !== RankingCategory.Asil) {
       throw new ConflictError(
         "NOT_ASIL",
@@ -140,7 +159,7 @@ export class IntibakService {
     };
     this.deps.intibakTables.save(table);
     application.intibakTableId = table.intibakTableId;
-    this.deps.applications.save(application);
+    await this.deps.applications.save(application);
 
     this.deps.audit.write({
       actorUserId,
@@ -217,7 +236,7 @@ export class IntibakService {
     return this.toDto(table, table.targetCurriculum);
   }
 
-  save(applicationId: string, actorUserId: string): { table: IntibakTable; message: string } {
+  async save(applicationId: string, actorUserId: string): Promise<{ table: IntibakTable; message: string }> {
     const table = this.requireTable(applicationId);
     if (table.isLocked) {
       throw new ConflictError("INTIBAK_LOCKED", "Intibak table is already saved and locked.");
@@ -232,9 +251,9 @@ export class IntibakService {
     table.isLocked = true;
     table.savedAt = new Date().toISOString();
     this.deps.intibakTables.save(table);
-    const application = this.requireApp(applicationId);
+    const application = await this.requireApp(applicationId);
     application.currentStatus = ApplicationStatus.IntibakCompleted;
-    this.deps.applications.save(application);
+    await this.deps.applications.save(application);
 
     this.deps.audit.write({
       actorUserId,
@@ -258,8 +277,8 @@ export class IntibakService {
     ]);
   }
 
-  departmentOverview(departmentId: string, periodId: string): DepartmentOverviewDto {
-    const apps = this.deps.applications.findByDepartmentAndPeriod(departmentId, periodId);
+  async departmentOverview(departmentId: string, periodId: string): Promise<DepartmentOverviewDto> {
+    const apps = await this.deps.applications.findByDepartmentAndPeriod(departmentId, periodId);
     const asil: string[] = [];
     const yedek: string[] = [];
     const red: string[] = [];
@@ -293,11 +312,38 @@ export class IntibakService {
     };
   }
 
-  sendPackage(actorUserId: string, input: SendPackageInput): EvaluationPackage {
+  async listCandidates(departmentId: string, periodId: string): Promise<IntibakCandidatesDto> {
+    const apps = await this.deps.applications.findByDepartmentAndPeriod(departmentId, periodId);
+    const ranked = apps.filter((a) => a.rankingCategory);
+    const candidates: IntibakCandidateDto[] = ranked
+      .map((a) => ({
+        applicationId: a.applicationId,
+        studentFullName: a.studentFullName,
+        studentTckn: a.studentTckn,
+        rankingCategory: a.rankingCategory ?? null,
+        currentStatus: a.currentStatus,
+        intibakStarted: !!this.deps.intibakTables.findByApplicationId(a.applicationId),
+        intibakCompleted: a.currentStatus === ApplicationStatus.IntibakCompleted,
+      }))
+      .sort((x, y) => x.studentFullName.localeCompare(y.studentFullName));
+
+    const asil = candidates.filter((c) => c.rankingCategory === RankingCategory.Asil);
+    const asilCompleted = asil.filter((c) => c.intibakCompleted).length;
+    return {
+      departmentId,
+      periodId,
+      candidates,
+      asilTotal: asil.length,
+      asilCompleted,
+      ready: asil.length > 0 && asilCompleted === asil.length,
+    };
+  }
+
+  async sendPackage(actorUserId: string, input: SendPackageInput): Promise<EvaluationPackage> {
     if (input.signaturePassword !== VALID_SIGNATURE_PASSWORD) {
       throw new ValidationError("Invalid digital signature password.");
     }
-    const overview = this.departmentOverview(input.departmentId, input.periodId);
+    const overview = await this.departmentOverview(input.departmentId, input.periodId);
     if (!overview.ready) {
       throw new ConflictError(
         "PACKAGE_INCOMPLETE",
@@ -334,10 +380,10 @@ export class IntibakService {
     this.deps.packages.save(pkg);
 
     for (const appId of [...overview.asil, ...overview.yedek, ...overview.red]) {
-      const a = this.deps.applications.findById(appId);
+      const a = await this.deps.applications.findById(appId);
       if (!a) continue;
       a.currentStatus = ApplicationStatus.PendingDeansOfficeReview;
-      this.deps.applications.save(a);
+      await this.deps.applications.save(a);
     }
     this.deps.audit.write({
       actorUserId,
@@ -351,8 +397,8 @@ export class IntibakService {
     return pkg;
   }
 
-  private requireApp(applicationId: string): Application {
-    const a = this.deps.applications.findById(applicationId);
+  private async requireApp(applicationId: string): Promise<Application> {
+    const a = await this.deps.applications.findById(applicationId);
     if (!a) throw new NotFoundError(`Application not found: ${applicationId}`);
     return a;
   }

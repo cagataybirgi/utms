@@ -152,6 +152,20 @@ function seedUsers(c: AppContainer): void {
       email: "elif.yildiz@iyte.edu.tr",
       roles: [UserRole.Student],
     },
+    {
+      userId: "student-selin-aksoy",
+      tckn: "20190501088",
+      fullName: "Selin Aksoy",
+      email: "selin.aksoy@iyte.edu.tr",
+      roles: [UserRole.Student],
+    },
+    {
+      userId: "student-cem-polat",
+      tckn: "20190501091",
+      fullName: "Cem Polat",
+      email: "cem.polat@iyte.edu.tr",
+      roles: [UserRole.Student],
+    },
   ];
 
   // Scenario 1 (Login) — seed credentials. These match the SPA's demo login hints;
@@ -307,6 +321,22 @@ export function buildSeedApplications(): Application[] {
       applicationId: "app-asil-mert-koc",
       studentId: "student-mert-koc",
       studentFullName: "Mert Koc",
+      currentStatus: ApplicationStatus.RankedAsil,
+      rankingCategory: RankingCategory.Asil,
+    }),
+    // ── Test Case 6K: Selin Aksoy — başarılı OCR ile transkript okuma ───────
+    buildApplication({
+      applicationId: "app-asil-selin-aksoy",
+      studentId: "student-selin-aksoy",
+      studentFullName: "Selin Aksoy",
+      currentStatus: ApplicationStatus.RankedAsil,
+      rankingCategory: RankingCategory.Asil,
+    }),
+    // ── Test Case 6L: Cem Polat — akıllı öneri benzerlik eşiği doğrulama ────
+    buildApplication({
+      applicationId: "app-asil-cem-polat",
+      studentId: "student-cem-polat",
+      studentFullName: "Cem Polat",
       currentStatus: ApplicationStatus.RankedAsil,
       rankingCategory: RankingCategory.Asil,
     }),
@@ -621,6 +651,8 @@ function seedDocuments(c: AppContainer): void {
     "app-asil-can-aydin",
     "app-asil-sude-arslan",
     "app-asil-mert-koc",
+    "app-asil-selin-aksoy",
+    "app-asil-cem-polat",
   ];
   for (const appId of intibakApps) {
     c.documents.put(makeDoc(appId, DocumentType.Transcript, true));
@@ -631,6 +663,7 @@ function seedCurriculum(c: AppContainer): void {
   const cmpeCurriculum: TargetCourse[] = [
     { code: "CMPE101", name: "Introduction to Programming", ects: 6 },
     { code: "CMPE112", name: "Discrete Mathematics", ects: 6 },
+    { code: "CMPE213", name: "Data Structures", ects: 6 },
     { code: "MATH101", name: "Calculus I", ects: 7 },
     { code: "MATH102", name: "Calculus II", ects: 7 },
     { code: "MATH100", name: "Calculus I+II Combined", ects: 8 },
@@ -687,6 +720,30 @@ function seedOcrFor(c: AppContainer): void {
   c.ocr.setTranscriptFor("doc-app-asil-mert-koc-transcript", { ok: true, courses: mertTranscript });
 
   c.ocr.setTranscriptFor("doc-app-asil-can-aydin-transcript", { ok: true, courses: [] });
+
+  // Test Case 6K: high-quality, machine-readable transcript — exactly 4 courses.
+  const selinTranscript: PreviousCourse[] = [
+    { code: "CMPE101", name: "Introduction to Programming", letterGrade: "AA", ects: 6 },
+    { code: "MATH151", name: "Calculus I", letterGrade: "BA", ects: 7 },
+    { code: "PHYS101", name: "Physics I", letterGrade: "CB", ects: 6 },
+    { code: "ENG101", name: "English I", letterGrade: "AA", ects: 3 },
+  ];
+  c.ocr.setTranscriptFor("doc-app-asil-selin-aksoy-transcript", { ok: true, courses: selinTranscript });
+
+  // Test Case 6L: similarity-threshold fixtures.
+  //  (a) high code+name similarity, exact ECTS → match CMPE101
+  //  (b) partial code, high name, exact ECTS    → match MATH101 (Calculus I)
+  //  (c) low code, high name, exact ECTS        → match CMPE213 (Data Structures)
+  //  (d) no similarity, ECTS out of range       → no suggestion
+  //  (e) code-prefix match but ECTS far off     → no suggestion
+  const cemTranscript: PreviousCourse[] = [
+    { code: "CMP101", name: "Intro to Programming", letterGrade: "AA", ects: 6 },
+    { code: "MAT150", name: "Calculus", letterGrade: "BA", ects: 7 },
+    { code: "CSE220", name: "Data Structures and Algorithms", letterGrade: "BB", ects: 6 },
+    { code: "HIST200", name: "Ottoman History", letterGrade: "AA", ects: 3 },
+    { code: "CMPE999", name: "Senior Project", letterGrade: "AA", ects: 12 },
+  ];
+  c.ocr.setTranscriptFor("doc-app-asil-cem-polat-transcript", { ok: true, courses: cemTranscript });
 }
 
 export function buildSeedQuotas(): DepartmentQuota[] {

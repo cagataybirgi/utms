@@ -39,7 +39,12 @@ export class SuggestionEngine {
     if (a === b) return 1;
     const prefixA = a.replace(/[0-9]/g, "");
     const prefixB = b.replace(/[0-9]/g, "");
-    return prefixA && prefixA === prefixB ? 0.7 : 0;
+    if (!prefixA || !prefixB) return 0;
+    if (prefixA === prefixB) return 0.7;
+    // Partial credit when one department prefix contains the other
+    // (e.g. "CMP" vs "CMPE") — common across institutions for the same subject.
+    if (prefixA.includes(prefixB) || prefixB.includes(prefixA)) return 0.6;
+    return 0;
   }
 
   private nameSimilarity(a: string, b: string): number {
@@ -49,7 +54,11 @@ export class SuggestionEngine {
     let inter = 0;
     for (const t of tokensA) if (tokensB.has(t)) inter++;
     const union = new Set<string>([...tokensA, ...tokensB]).size;
-    return inter / union;
+    const jaccard = inter / union;
+    // Overlap coefficient rewards containment, so an abbreviated or extended
+    // title ("Data Structures" ⊆ "Data Structures and Algorithms") still matches.
+    const overlap = inter / Math.min(tokensA.size, tokensB.size);
+    return Math.max(jaccard, overlap);
   }
 
   private tokenize(text: string): string[] {

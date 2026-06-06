@@ -30,6 +30,9 @@ export default defineConfig({
     },
   },
   server: {
+    // Match the test report URLs (http://localhost:3000).
+    port: 3000,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',

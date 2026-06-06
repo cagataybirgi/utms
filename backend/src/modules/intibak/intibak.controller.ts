@@ -40,10 +40,10 @@ const OverviewQuerySchema = z.object({
 export class IntibakController {
   constructor(private readonly service: IntibakService) {}
 
-  prepare = (req: Request, res: Response): void => {
+  prepare = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
-    const dto = this.service.prepare(applicationId, userId);
+    const dto = await this.service.prepare(applicationId, userId);
     res.json(dto);
   };
 
@@ -78,24 +78,31 @@ export class IntibakController {
     res.json(dto);
   };
 
-  save = (req: Request, res: Response): void => {
+  save = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
-    const result = this.service.save(applicationId, userId);
+    const result = await this.service.save(applicationId, userId);
     res.json(result);
   };
 
-  overview = (req: Request, res: Response): void => {
+  overview = async (req: Request, res: Response): Promise<void> => {
     this.requireUser(req);
     const query = OverviewQuerySchema.parse(req.query);
-    const dto = this.service.departmentOverview(query.departmentId, query.periodId);
+    const dto = await this.service.departmentOverview(query.departmentId, query.periodId);
     res.json(dto);
   };
 
-  sendPackage = (req: Request, res: Response): void => {
+  candidates = async (req: Request, res: Response): Promise<void> => {
+    this.requireUser(req);
+    const query = OverviewQuerySchema.parse(req.query);
+    const dto = await this.service.listCandidates(query.departmentId, query.periodId);
+    res.json(dto);
+  };
+
+  sendPackage = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const body = SendPackageSchema.parse(req.body);
-    const pkg = this.service.sendPackage(userId, body);
+    const pkg = await this.service.sendPackage(userId, body);
     res.json({
       package: pkg,
       message: "Package forwarded to Dean's Office.",

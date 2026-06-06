@@ -18,6 +18,8 @@ import { ApplicationReview } from './ApplicationReview';
 import { AcademicEligibility } from './AcademicEligibility';
 import { RankingTable } from './RankingTable';
 import { IntibakGeneration } from './IntibakGeneration';
+import { IntibakQueue } from './IntibakQueue';
+import { IntibakPackage } from './IntibakPackage';
 
 interface YGKDashboardProps {
   user: User;
@@ -32,6 +34,12 @@ export function YGKDashboard({ user, onLogout, onSwitchRole }: YGKDashboardProps
   const [currentSection, setCurrentSection] = useState<Section>('dashboard');
   const [currentView, setCurrentView] = useState<YGKView>('dashboard');
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
+
+  // Scenario 6 (Intibak) sub-flow: queue → generation (per applicant) → package.
+  type IntibakView = 'queue' | 'generation' | 'package';
+  const [intibakView, setIntibakView] = useState<IntibakView>('queue');
+  const [intibakApp, setIntibakApp] = useState<{ id: string; name: string; readOnly: boolean } | null>(null);
+  const [intibakPkg, setIntibakPkg] = useState<{ departmentId: string; periodId: string } | null>(null);
 
   const handleOpenApplication = (applicationId: string) => {
     setSelectedApplicationId(applicationId);
@@ -92,13 +100,41 @@ export function YGKDashboard({ user, onLogout, onSwitchRole }: YGKDashboardProps
     }
 
     if (currentView === 'intibak' || currentSection === 'intibak') {
+      if (intibakView === 'generation' && intibakApp) {
+        return (
+          <IntibakGeneration
+            applicationId={intibakApp.id}
+            studentName={intibakApp.name}
+            readOnly={intibakApp.readOnly}
+            onBack={() => { setIntibakView('queue'); setIntibakApp(null); }}
+          />
+        );
+      }
+      if (intibakView === 'package' && intibakPkg) {
+        return (
+          <IntibakPackage
+            departmentId={intibakPkg.departmentId}
+            periodId={intibakPkg.periodId}
+            onBack={() => { setIntibakView('queue'); setIntibakPkg(null); }}
+          />
+        );
+      }
       return (
         <div className="space-y-4">
           <Button variant="ghost" onClick={() => { setCurrentView('dashboard'); setCurrentSection('dashboard'); }} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Geri Dön
           </Button>
-          <IntibakGeneration onBack={() => { setCurrentView('dashboard'); setCurrentSection('dashboard'); }} />
+          <IntibakQueue
+            onOpenApplication={(id, name, readOnly) => {
+              setIntibakApp({ id, name, readOnly });
+              setIntibakView('generation');
+            }}
+            onOpenPackage={(departmentId, periodId) => {
+              setIntibakPkg({ departmentId, periodId });
+              setIntibakView('package');
+            }}
+          />
         </div>
       );
     }
@@ -265,7 +301,7 @@ export function YGKDashboard({ user, onLogout, onSwitchRole }: YGKDashboardProps
           <Button
             variant="outline"
             className="h-auto py-6 flex flex-col items-center space-y-2"
-            onClick={() => setCurrentView('intibak')}
+            onClick={() => { setIntibakView('queue'); setIntibakApp(null); setIntibakPkg(null); setCurrentView('intibak'); }}
           >
             <Award className="w-8 h-8" style={{ color: '#7A1616' }} />
             <div>
@@ -310,6 +346,9 @@ export function YGKDashboard({ user, onLogout, onSwitchRole }: YGKDashboardProps
         } else if (section === 'rankings') {
           setCurrentView('ranking');
         } else if (section === 'intibak') {
+          setIntibakView('queue');
+          setIntibakApp(null);
+          setIntibakPkg(null);
           setCurrentView('intibak');
         }
       }}

@@ -1,5 +1,5 @@
 import express, { Express, NextFunction, Request, Response } from "express";
-import { AppContainer, createContainer } from "./shared/container";
+import { AppContainer, createContainer, resetContainer } from "./shared/container";
 import { mockAuthMiddleware } from "./shared/middleware/mock-auth";
 import { errorHandler } from "./shared/middleware/error-handler";
 import { buildOidbRouter } from "./modules/oidb/oidb.routes";
@@ -34,6 +34,16 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.get("/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", scope: "Scenario 1 (Login) & Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 5 (Ranking) & Scenario 6 (Intibak)" });
   });
+
+  // DEV-ONLY: reset in-memory state (auth locks, reset tokens, rate limits,
+  // seed passwords) to baseline so the Scenario 1 manual test flow is repeatable.
+  // Disabled in production; Neon data is reset separately via prisma/seed.ts.
+  if (process.env.NODE_ENV !== "production") {
+    app.post("/api/dev/reset", (_req: Request, res: Response) => {
+      resetContainer(container);
+      res.json({ status: "ok", message: "In-memory state reset to seed baseline." });
+    });
+  }
 
   // Scenario 1 (Login) — pre-authentication endpoints, mounted before mock-auth.
   app.use("/api/auth", buildAuthRouter(container));
