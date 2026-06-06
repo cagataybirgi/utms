@@ -1,7 +1,7 @@
 import {
   InMemoryApplicationRepository,
   InMemoryAuditRepository,
-  InMemoryAuthRepository,
+  InMemoryAuthTokenRepository,
   InMemoryCurriculumRepository,
   InMemoryDocumentRepository,
   InMemoryIntibakRepository,
@@ -24,7 +24,7 @@ export interface AppContainer {
   quotas: InMemoryQuotaRepository;
   audit: InMemoryAuditRepository;
   notifications: InMemoryNotificationRepository;
-  auth: InMemoryAuthRepository;
+  auth: InMemoryAuthTokenRepository;
   edevlet: EDevletMockClient;
   ocr: OcrParserMockClient;
 }
@@ -40,7 +40,7 @@ export function createContainer(): AppContainer {
     quotas: new InMemoryQuotaRepository(),
     audit: new InMemoryAuditRepository(),
     notifications: new InMemoryNotificationRepository(),
-    auth: new InMemoryAuthRepository(),
+    auth: new InMemoryAuthTokenRepository(),
     edevlet: new EDevletMockClient(),
     ocr: new OcrParserMockClient(),
   };

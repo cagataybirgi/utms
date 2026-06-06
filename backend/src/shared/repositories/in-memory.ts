@@ -211,7 +211,7 @@ export interface PasswordResetToken {
   used: boolean;
 }
 
-export class InMemoryAuthRepository {
+export class InMemoryAuthTokenRepository {
   private readonly tokens = new Map<string, PasswordResetToken>();
   private readonly resetRequests = new Map<string, number[]>(); // key -> request timestamps (ms)
   private emailServiceAvailable = true;

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { AppContainer } from "../../shared/container";
 import { AuditLogger } from "../../shared/audit/audit-logger";
+import { IAuditRepository } from "../../shared/repositories";
+import { IAuthRepository } from "../../shared/repositories/auth-interfaces";
 import { User, UserRole } from "../../shared/types";
 import {
   LockedError,
@@ -26,10 +27,10 @@ export const AUTH_MESSAGES = {
 
 export const AUTH_CONFIG = {
   maxFailedAttempts: 5,
-  lockDurationMs: 15 * 60 * 1000, // 15 minutes
-  tokenExpiryMs: 60 * 60 * 1000, // 1 hour
-  resetRateWindowMs: 15 * 60 * 1000, // 15 minutes
-  resetRateMax: 2, // allow 2 reset requests per window; the 3rd is blocked
+  lockDurationMs: 15 * 60 * 1000,
+  tokenExpiryMs: 60 * 60 * 1000,
+  resetRateWindowMs: 15 * 60 * 1000,
+  resetRateMax: 2,
 } as const;
 
 export interface AuthUserDto {
@@ -44,9 +45,12 @@ export interface AuthUserDto {
 
 export interface ForgotPasswordResult {
   message: string;
-  // Returned for the in-memory demo so the SPA can open the reset page without a
-  // real inbox. A production system would only deliver this via e-mail.
   resetToken: string;
+}
+
+export interface AuthServiceDeps {
+  auth: IAuthRepository;
+  audit: IAuditRepository;
 }
 
 function toDto(u: User): AuthUserDto {
@@ -64,32 +68,31 @@ function toDto(u: User): AuthUserDto {
 export class AuthService {
   private readonly audit: AuditLogger;
 
-  constructor(private readonly container: AppContainer) {
-    this.audit = new AuditLogger(container.audit);
+  constructor(private readonly deps: AuthServiceDeps) {
+    this.audit = new AuditLogger(deps.audit);
   }
 
   /** Test Cases 1A (success), 1B (lockout), 1C (invalid credentials). */
-  login(tckn: string, password: string, now: number = Date.now()): AuthUserDto {
+  async login(tckn: string, password: string, now: number = Date.now()): Promise<AuthUserDto> {
     if (!tckn || !password) {
       throw new ValidationError("TCKN ve şifre zorunludur.");
     }
 
-    const user = this.container.users.findByTckn(tckn);
+    const user = await this.deps.auth.findUserByTckn(tckn);
 
-    // Already-locked account: block before checking the password.
     if (user && this.isLocked(user, now)) {
       throw new LockedError(AUTH_MESSAGES.accountLocked);
     }
 
     if (!user || !verifyPassword(password, user.passwordHash)) {
-      if (user) this.registerFailedAttempt(user, now);
+      if (user) await this.registerFailedAttempt(user, now);
       throw new UnauthorizedError(AUTH_MESSAGES.invalidCredentials);
     }
 
-    // Success — clear the failed-attempt counter and any expired lock.
-    user.failedLoginAttempts = 0;
-    user.lockedUntil = null;
-    this.container.users.put(user);
+    await this.deps.auth.updateUserAuthState(user.userId, {
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    });
 
     this.audit.write({
       actorUserId: user.userId,
@@ -106,25 +109,30 @@ export class AuthService {
     return !!user.lockedUntil && new Date(user.lockedUntil).getTime() > now;
   }
 
-  private registerFailedAttempt(user: User, now: number): void {
+  private async registerFailedAttempt(user: User, now: number): Promise<void> {
     const attempts = (user.failedLoginAttempts ?? 0) + 1;
-    user.failedLoginAttempts = attempts;
 
     if (attempts >= AUTH_CONFIG.maxFailedAttempts) {
-      user.lockedUntil = new Date(now + AUTH_CONFIG.lockDurationMs).toISOString();
-      this.container.users.put(user);
+      const lockedUntil = new Date(now + AUTH_CONFIG.lockDurationMs).toISOString();
+      await this.deps.auth.updateUserAuthState(user.userId, {
+        failedLoginAttempts: attempts,
+        lockedUntil,
+      });
       this.audit.write({
         actorUserId: user.userId,
         actorRole: user.roles[0],
         actionType: "ACCOUNT_LOCKED",
         affectedEntityId: user.userId,
         affectedEntityType: "User",
-        newValue: { lockedUntil: user.lockedUntil, failedLoginAttempts: attempts },
+        newValue: { lockedUntil, failedLoginAttempts: attempts },
       });
       throw new LockedError(AUTH_MESSAGES.accountLocked);
     }
 
-    this.container.users.put(user);
+    await this.deps.auth.updateUserAuthState(user.userId, {
+      failedLoginAttempts: attempts,
+      lockedUntil: user.lockedUntil ?? null,
+    });
     this.audit.write({
       actorUserId: user.userId,
       actorRole: user.roles[0],
@@ -136,57 +144,44 @@ export class AuthService {
   }
 
   /** Test Cases 1D (request), 1E (mismatch), 1H (e-mail down), 1I (rate limit). */
-  requestPasswordReset(
+  async requestPasswordReset(
     tckn: string,
     email: string,
     now: number = Date.now(),
-  ): ForgotPasswordResult {
+  ): Promise<ForgotPasswordResult> {
     if (!tckn || !email) {
       throw new ValidationError("TCKN ve e-posta zorunludur.");
     }
 
-    const user = this.container.users.findByTckn(tckn);
+    const user = await this.deps.auth.findUserByTckn(tckn);
 
-    // 1E — TCKN/e-mail do not belong to the same account. Generic message; no leak.
     if (!user || user.email.toLowerCase() !== email.toLowerCase()) {
       throw new ValidationError(AUTH_MESSAGES.forgotMismatch);
     }
 
-    const key = `${tckn}::${email.toLowerCase()}`;
-
-    // 1I — rate limit before doing any work / sending mail.
     if (
-      this.container.auth.countResetRequests(key, AUTH_CONFIG.resetRateWindowMs, now) >=
-      AUTH_CONFIG.resetRateMax
+      (await this.deps.auth.countRecentResetRequests(
+        user.userId,
+        AUTH_CONFIG.resetRateWindowMs,
+        now,
+      )) >= AUTH_CONFIG.resetRateMax
     ) {
       throw new TooManyRequestsError(AUTH_MESSAGES.rateLimited);
     }
 
-    // 1H — simulated e-mail gateway outage. Nothing is recorded so the user can retry.
-    if (!this.container.auth.isEmailServiceAvailable()) {
+    if (!this.deps.auth.isEmailServiceAvailable()) {
       throw new ServiceUnavailableError("EMAIL_SERVICE_DOWN", AUTH_MESSAGES.emailServiceDown);
     }
 
     const token = randomUUID();
-    this.container.auth.saveToken({
+    await this.deps.auth.saveResetToken({
       token,
       userId: user.userId,
       expiresAt: now + AUTH_CONFIG.tokenExpiryMs,
       used: false,
     });
-    this.container.auth.recordResetRequest(key, AUTH_CONFIG.resetRateWindowMs, now);
-
-    // Simulated e-mail delivery via the notification repository.
-    this.container.notifications.append({
-      notificationId: randomUUID(),
-      recipientUserId: user.userId,
-      eventType: "PASSWORD_RESET_REQUESTED",
-      channel: "EMAIL",
-      subject: "UTMS şifre sıfırlama",
-      body: `Şifre sıfırlama bağlantınız: /reset-password?token=${token}`,
-      isDelivered: true,
-      createdAt: new Date(now).toISOString(),
-    });
+    await this.deps.auth.recordResetRequest(user.userId, AUTH_CONFIG.resetRateWindowMs, now);
+    await this.deps.auth.appendPasswordResetNotification(user.userId, token, now);
 
     this.audit.write({
       actorUserId: user.userId,
@@ -200,20 +195,18 @@ export class AuthService {
   }
 
   /** Test Cases 1D (complete), 1F (expired/used), 1G (validation). */
-  resetPassword(
+  async resetPassword(
     token: string,
     newPassword: string,
     confirmPassword: string,
     now: number = Date.now(),
-  ): { message: string } {
-    const record = this.container.auth.findToken(token);
+  ): Promise<{ message: string }> {
+    const record = await this.deps.auth.findResetToken(token);
 
-    // 1F — token missing, already used, or expired.
     if (!record || record.used || record.expiresAt < now) {
       throw new ValidationError(AUTH_MESSAGES.tokenInvalid, { code: "TOKEN_INVALID" });
     }
 
-    // 1G — complexity + confirmation. The token is NOT consumed so the user can retry.
     const complexityError = validatePasswordComplexity(newPassword);
     if (complexityError) {
       throw new ValidationError(complexityError);
@@ -222,16 +215,13 @@ export class AuthService {
       throw new ValidationError(AUTH_MESSAGES.passwordsDoNotMatch);
     }
 
-    const user = this.container.users.findById(record.userId);
+    const user = await this.deps.auth.findUserById(record.userId);
     if (!user) {
       throw new ValidationError(AUTH_MESSAGES.tokenInvalid, { code: "TOKEN_INVALID" });
     }
 
-    user.passwordHash = hashPassword(newPassword);
-    user.failedLoginAttempts = 0;
-    user.lockedUntil = null;
-    this.container.users.put(user);
-    this.container.auth.markTokenUsed(token);
+    await this.deps.auth.updatePassword(record.userId, hashPassword(newPassword));
+    await this.deps.auth.markResetTokenUsed(token);
 
     this.audit.write({
       actorUserId: user.userId,

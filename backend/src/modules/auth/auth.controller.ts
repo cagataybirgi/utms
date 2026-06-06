@@ -4,30 +4,30 @@ import { AuthService } from "./auth.service";
 export class AuthController {
   constructor(private readonly service: AuthService) {}
 
-  login = (req: Request, res: Response, next: NextFunction): void => {
+  login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { tckn, password } = req.body ?? {};
-      const user = this.service.login(String(tckn ?? ""), String(password ?? ""));
+      const user = await this.service.login(String(tckn ?? ""), String(password ?? ""));
       res.json({ user });
     } catch (e) {
       next(e);
     }
   };
 
-  forgotPassword = (req: Request, res: Response, next: NextFunction): void => {
+  forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { tckn, email } = req.body ?? {};
-      const result = this.service.requestPasswordReset(String(tckn ?? ""), String(email ?? ""));
+      const result = await this.service.requestPasswordReset(String(tckn ?? ""), String(email ?? ""));
       res.json(result);
     } catch (e) {
       next(e);
     }
   };
 
-  resetPassword = (req: Request, res: Response, next: NextFunction): void => {
+  resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { token, newPassword, confirmPassword } = req.body ?? {};
-      const result = this.service.resetPassword(
+      const result = await this.service.resetPassword(
         String(token ?? ""),
         String(newPassword ?? ""),
         String(confirmPassword ?? ""),

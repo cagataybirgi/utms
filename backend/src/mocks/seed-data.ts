@@ -35,7 +35,17 @@ function nowIso(): string {
   return new Date("2026-04-25T10:00:00.000Z").toISOString();
 }
 
-function seedUsers(c: AppContainer): void {
+const SEED_PASSWORDS: Record<string, string> = {
+  "user-oidb-1": "oidb123",
+  "user-ygk-cmpe-1": "ygk123",
+  "user-ygk-chair-cmpe": "ygkchair123",
+  "user-deans-eng": "dean123",
+  "user-admin": "admin123",
+  "student-ahmet-yilmaz": "ValidPass1!",
+};
+
+/** Scenario 1 + Neon seed — same users/passwords as the in-memory container. */
+export function buildSeedUsers(): User[] {
   const users: User[] = [
     {
       userId: "user-oidb-1",
@@ -168,20 +178,16 @@ function seedUsers(c: AppContainer): void {
     },
   ];
 
-  // Scenario 1 (Login) — seed credentials. These match the SPA's demo login hints;
-  // the primary student account uses the password from the test report (1A).
-  const passwords: Record<string, string> = {
-    "user-oidb-1": "oidb123",
-    "user-ygk-cmpe-1": "ygk123",
-    "user-ygk-chair-cmpe": "ygkchair123",
-    "user-deans-eng": "dean123",
-    "user-admin": "admin123",
-    "student-ahmet-yilmaz": "ValidPass1!",
-  };
-  for (const u of users) {
-    u.passwordHash = hashPassword(passwords[u.userId] ?? "Ogrenci123!");
-    u.failedLoginAttempts = 0;
-    u.lockedUntil = null;
+  return users.map((u) => ({
+    ...u,
+    passwordHash: hashPassword(SEED_PASSWORDS[u.userId] ?? "Ogrenci123!"),
+    failedLoginAttempts: 0,
+    lockedUntil: null,
+  }));
+}
+
+function seedUsers(c: AppContainer): void {
+  for (const u of buildSeedUsers()) {
     c.users.put(u);
   }
 }
