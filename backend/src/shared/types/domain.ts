@@ -16,6 +16,10 @@ export interface User {
   roles: UserRole[];
   departmentId?: string;
   facultyId?: string;
+  // Scenario 1 (Login) — auth fields. In-memory demo only.
+  passwordHash?: string;
+  failedLoginAttempts?: number;
+  lockedUntil?: string | null;
 }
 
 export interface Department {

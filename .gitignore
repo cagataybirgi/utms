@@ -1,4 +1,5 @@
 node_modules/
+build/
 backend/dist/
 .claude/settings.local.json
 DesignDocuments/Group1_SDD_Updated (1) (4).pdf

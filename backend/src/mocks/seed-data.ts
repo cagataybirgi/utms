@@ -11,6 +11,7 @@ import {
   UserRole,
 } from "../shared/types";
 import type { AppContainer } from "../shared/container";
+import { hashPassword } from "../modules/auth/password";
 
 const PERIOD_ID = "period-spring-2026";
 const PERIOD_SCENARIOS = "period-ygk-scenarios-2026";
@@ -152,7 +153,23 @@ function seedUsers(c: AppContainer): void {
       roles: [UserRole.Student],
     },
   ];
-  for (const u of users) c.users.put(u);
+
+  // Scenario 1 (Login) — seed credentials. These match the SPA's demo login hints;
+  // the primary student account uses the password from the test report (1A).
+  const passwords: Record<string, string> = {
+    "user-oidb-1": "oidb123",
+    "user-ygk-cmpe-1": "ygk123",
+    "user-ygk-chair-cmpe": "ygkchair123",
+    "user-deans-eng": "dean123",
+    "user-admin": "admin123",
+    "student-ahmet-yilmaz": "ValidPass1!",
+  };
+  for (const u of users) {
+    u.passwordHash = hashPassword(passwords[u.userId] ?? "Ogrenci123!");
+    u.failedLoginAttempts = 0;
+    u.lockedUntil = null;
+    c.users.put(u);
+  }
 }
 
 function buildApplication(partial: Partial<Application> & { applicationId: string; studentId: string }): Application {

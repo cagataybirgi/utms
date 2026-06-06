@@ -202,6 +202,61 @@ export class InMemoryQuotaRepository {
   clear(): void { this.store.clear(); }
 }
 
+// Scenario 1 (Login) — holds password-reset tokens, reset-request rate-limit
+// counters and a simulated e-mail gateway availability flag. In-memory demo only.
+export interface PasswordResetToken {
+  token: string;
+  userId: string;
+  expiresAt: number; // epoch ms
+  used: boolean;
+}
+
+export class InMemoryAuthRepository {
+  private readonly tokens = new Map<string, PasswordResetToken>();
+  private readonly resetRequests = new Map<string, number[]>(); // key -> request timestamps (ms)
+  private emailServiceAvailable = true;
+
+  clear(): void {
+    this.tokens.clear();
+    this.resetRequests.clear();
+    this.emailServiceAvailable = true;
+  }
+
+  setEmailServiceAvailable(available: boolean): void {
+    this.emailServiceAvailable = available;
+  }
+
+  isEmailServiceAvailable(): boolean {
+    return this.emailServiceAvailable;
+  }
+
+  saveToken(token: PasswordResetToken): PasswordResetToken {
+    this.tokens.set(token.token, token);
+    return token;
+  }
+
+  findToken(token: string): PasswordResetToken | undefined {
+    return this.tokens.get(token);
+  }
+
+  markTokenUsed(token: string): void {
+    const t = this.tokens.get(token);
+    if (t) t.used = true;
+  }
+
+  /** Records a reset request and returns how many were made within the window. */
+  recordResetRequest(key: string, windowMs: number, now: number = Date.now()): number {
+    const recent = (this.resetRequests.get(key) ?? []).filter((ts) => now - ts < windowMs);
+    recent.push(now);
+    this.resetRequests.set(key, recent);
+    return recent.length;
+  }
+
+  countResetRequests(key: string, windowMs: number, now: number = Date.now()): number {
+    return (this.resetRequests.get(key) ?? []).filter((ts) => now - ts < windowMs).length;
+  }
+}
+
 export class InMemoryNotificationRepository implements INotificationRepository {
   private entries: NotificationRecord[] = [];
   clear(): void { this.entries = []; }

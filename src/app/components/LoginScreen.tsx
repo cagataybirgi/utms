@@ -6,89 +6,26 @@ import { Alert, AlertDescription } from './ui/alert';
 import { AlertCircle, Lock, User as UserIcon } from 'lucide-react';
 import type { User } from '../App';
 import { ForgotPasswordScreen } from './ForgotPasswordScreen';
-
-// Mock user database
-const MOCK_USERS: Record<string, { password: string; user: User }> = {
-  '12345678901': {
-    password: 'student123',
-    user: {
-      id: 'student-ahmet-yilmaz', // matches backend seed userId
-      tckn: '12345678901',
-      name: 'Ahmet',
-      surname: 'Yılmaz',
-      roles: ['Student'],
-      email: 'ahmet.yilmaz@student.edu.tr'
-    }
-  },
-  '98765432109': {
-    password: 'admin123',
-    user: {
-      id: '2',
-      tckn: '98765432109',
-      name: 'Mehmet',
-      surname: 'Demir',
-      roles: ['OIDB', 'Admin'],
-      email: 'mehmet.demir@admin.edu.tr'
-    }
-  },
-  '11111111111': {
-    password: 'oidb123',
-    user: {
-      id: 'user-oidb-1', // matches backend seed userId
-      tckn: '11111111111',
-      name: 'Ahmet Mete',
-      surname: 'Yazıcı',
-      roles: ['OIDB'],
-      email: 'oidb1@iyte.edu.tr'
-    }
-  },
-  '22222222222': {
-    password: 'ygk123',
-    user: {
-      id: 'user-ygk-cmpe-1', // matches backend seed userId
-      tckn: '22222222222',
-      name: 'Melih',
-      surname: 'Macit',
-      roles: ['YGK'],
-      email: 'ygk-cmpe@iyte.edu.tr'
-    }
-  },
-  '33333333333': {
-    password: 'ygkchair123',
-    user: {
-      id: 'user-ygk-chair-cmpe', // matches backend seed userId
-      tckn: '33333333333',
-      name: 'YGK',
-      surname: 'Chair',
-      roles: ['YGK'],
-      email: 'ygk-chair-cmpe@iyte.edu.tr'
-    }
-  },
-  '44444444444': {
-    password: 'dean123',
-    user: {
-      id: 'user-deans-eng', // matches backend seed userId
-      tckn: '44444444444',
-      name: 'Deans',
-      surname: 'Office',
-      roles: ['Dean'],
-      email: 'deans-eng@iyte.edu.tr'
-    }
-  }
-};
+import { ResetPasswordScreen } from './ResetPasswordScreen';
+import { RegisterScreen } from './RegisterScreen';
+import { login as apiLogin, AuthApiError } from '../lib/api/auth';
 
 interface LoginScreenProps {
   onLogin: (user: User) => void;
+  initialResetToken?: string | null;
 }
 
-export function LoginScreen({ onLogin }: LoginScreenProps) {
+type Screen = 'login' | 'forgot' | 'reset' | 'register';
+
+export function LoginScreen({ onLogin, initialResetToken }: LoginScreenProps) {
   const [tckn, setTckn] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
-  const [failedAttempts, setFailedAttempts] = useState(0);
   const [remainingTime, setRemainingTime] = useState(0);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [screen, setScreen] = useState<Screen>(initialResetToken ? 'reset' : 'login');
+  const [resetToken, setResetToken] = useState<string>(initialResetToken ?? '');
 
   useEffect(() => {
     const savedLockout = localStorage.getItem('lockoutUntil');
@@ -110,7 +47,6 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
         setRemainingTime(remaining);
         if (remaining === 0) {
           setLockoutUntil(null);
-          setFailedAttempts(0);
           localStorage.removeItem('lockoutUntil');
         }
       }, 1000);
@@ -118,46 +54,70 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     return () => clearInterval(interval);
   }, [lockoutUntil]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const isLocked = !!lockoutUntil && Date.now() < lockoutUntil;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (lockoutUntil && Date.now() < lockoutUntil) {
-      return;
-    }
+    if (isLocked) return;
 
     if (!tckn || !password) {
       setError('Lütfen tüm alanları doldurunuz.');
       return;
     }
-
     if (tckn.length !== 11 || !/^\d+$/.test(tckn)) {
       setError('T.C. Kimlik Numarası 11 haneli olmalıdır.');
       return;
     }
 
-    const userRecord = MOCK_USERS[tckn];
-    if (!userRecord || userRecord.password !== password) {
-      const newAttempts = failedAttempts + 1;
-      setFailedAttempts(newAttempts);
-
-      if (newAttempts >= 5) {
+    setLoading(true);
+    try {
+      const user = await apiLogin(tckn, password);
+      onLogin(user);
+    } catch (err) {
+      if (err instanceof AuthApiError && err.status === 423) {
+        // Account locked — start the 15-minute countdown and disable the button.
         const until = Date.now() + 15 * 60 * 1000;
         setLockoutUntil(until);
         localStorage.setItem('lockoutUntil', until.toString());
-        setError('Çok fazla hatalı giriş denemesi. Hesabınız 15 dakika kilitlendi.');
+        setError(err.message);
+      } else if (err instanceof AuthApiError) {
+        // Invalid credentials / rate limit — clear the password, keep the TCKN.
+        setError(err.message);
+        setPassword('');
       } else {
-        setError(`Hatalı T.C. Kimlik Numarası veya şifre. Deneme ${newAttempts}/5`);
+        setError('Sunucuya ulaşılamadı. Lütfen daha sonra tekrar deneyin.');
       }
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    setFailedAttempts(0);
-    onLogin(userRecord.user);
   };
 
-  if (showForgotPassword) {
-    return <ForgotPasswordScreen onBack={() => setShowForgotPassword(false)} />;
+  if (screen === 'forgot') {
+    return (
+      <ForgotPasswordScreen
+        onBack={() => setScreen('login')}
+        onResetLink={(token) => {
+          setResetToken(token);
+          setScreen('reset');
+        }}
+      />
+    );
+  }
+
+  if (screen === 'reset') {
+    return (
+      <ResetPasswordScreen
+        token={resetToken}
+        onBack={() => setScreen('login')}
+        onResetComplete={() => setScreen('login')}
+      />
+    );
+  }
+
+  if (screen === 'register') {
+    return <RegisterScreen onBack={() => setScreen('login')} />;
   }
 
   return (
@@ -190,7 +150,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               </Alert>
             )}
 
-            {lockoutUntil && Date.now() < lockoutUntil && (
+            {isLocked && (
               <Alert variant="destructive" className="bg-orange-50 border-orange-100 text-orange-800">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription className="text-xs font-bold">
@@ -210,7 +170,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                   value={tckn}
                   onChange={(e) => setTckn(e.target.value)}
                   maxLength={11}
-                  disabled={!!lockoutUntil && Date.now() < lockoutUntil}
+                  disabled={isLocked}
                   className="pl-10 bg-gray-50 border-gray-200 focus:bg-white transition-all h-11"
                 />
               </div>
@@ -218,10 +178,10 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <Label htmlFor="password" senior-only="true" className="text-xs font-bold uppercase tracking-wider text-gray-500">Şifre</Label>
+                <Label htmlFor="password" className="text-xs font-bold uppercase tracking-wider text-gray-500">Şifre</Label>
                 <button
                   type="button"
-                  onClick={() => setShowForgotPassword(true)}
+                  onClick={() => setScreen('forgot')}
                   className="text-xs font-bold hover:text-[#900000] transition-colors"
                   style={{ color: '#C00000' }}
                 >
@@ -236,7 +196,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                   placeholder="Şifreniz"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={!!lockoutUntil && Date.now() < lockoutUntil}
+                  disabled={isLocked}
                   className="pl-10 bg-gray-50 border-gray-200 focus:bg-white transition-all h-11"
                 />
               </div>
@@ -247,22 +207,40 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                 type="submit"
                 className="w-full h-11 font-bold shadow-lg shadow-red-100"
                 style={{ backgroundColor: '#C00000' }}
-                disabled={!!lockoutUntil && Date.now() < lockoutUntil}
+                disabled={isLocked || loading}
               >
-                Giriş Yap
+                {loading ? (
+                  <div className="flex items-center justify-center">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                    Giriş yapılıyor...
+                  </div>
+                ) : 'Giriş Yap'}
               </Button>
             </div>
+
+            <p className="text-center text-xs text-gray-500 pt-1">
+              Hesabınız yok mu?{' '}
+              <button
+                type="button"
+                onClick={() => setScreen('register')}
+                className="font-bold hover:text-[#900000] transition-colors"
+                style={{ color: '#C00000' }}
+              >
+                Kayıt Ol
+              </button>
+            </p>
           </form>
 
           {/* Demo Credentials */}
           <div className="mt-8 pt-6 border-t border-gray-100">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 text-center">Demo Giriş Bilgileri</p>
             <div className="grid grid-cols-2 gap-2 text-[10px] font-medium text-gray-500">
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Öğrenci: <span className="text-gray-900">12345678901</span></span><span>Şifre: <span className="text-gray-900">student123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Öğrenci: <span className="text-gray-900">12345678901</span></span><span>Şifre: <span className="text-gray-900">ValidPass1!</span></span></div>
               <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>ÖİDB: <span className="text-gray-900">11111111111</span></span><span>Şifre: <span className="text-gray-900">oidb123</span></span></div>
               <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YGK: <span className="text-gray-900">22222222222</span></span><span>Şifre: <span className="text-gray-900">ygk123</span></span></div>
               <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YGK Başkanı: <span className="text-gray-900">33333333333</span></span><span>Şifre: <span className="text-gray-900">ygkchair123</span></span></div>
               <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Dekanlık: <span className="text-gray-900">44444444444</span></span><span>Şifre: <span className="text-gray-900">dean123</span></span></div>
+              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Admin: <span className="text-gray-900">99999999999</span></span><span>Şifre: <span className="text-gray-900">admin123</span></span></div>
             </div>
           </div>
         </div>

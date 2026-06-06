@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { AppShell } from '../AppShell';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
@@ -15,9 +16,11 @@ import {
   Upload,
 } from 'lucide-react';
 import type { User } from '../../App';
-import { ApplicationForm } from './ApplicationForm';
+import { ApplicationForm, type ApplicationFormValues } from './ApplicationForm';
 import { DocumentUpload } from './DocumentUpload';
-import { createApplication, listApplications, type ApplicationSummaryDto } from '../../lib/api/document-upload';
+import { createApplication, listApplications, cancelApplication, getActivePeriod, type ApplicationSummaryDto } from '../../lib/api/document-upload';
+
+const DRAFT_STORAGE_KEY = 'utms_application_draft';
 import { ApplicationTimeline } from './ApplicationTimeline';
 import { FinalResult } from './FinalResult';
 import { AppealForm } from './AppealForm';
@@ -47,6 +50,17 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
   const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
   const [applications, setApplications] = useState<ApplicationSummaryDto[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
+  const [draftData, setDraftData] = useState<Partial<ApplicationFormValues> | undefined>(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const [draftApplicationId, setDraftApplicationId] = useState<string | null>(() => {
+    return localStorage.getItem(DRAFT_STORAGE_KEY + '_id');
+  });
 
   useEffect(() => {
     listApplications(user.id)
@@ -55,19 +69,68 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
       .finally(() => setAppsLoading(false));
   }, [user.id]);
 
-  const handleFormSave = async (data: any) => {
+  const handleFormSave = async (data: ApplicationFormValues) => {
+    // Draft: save to DB + localStorage
+    if (data.isDraft) {
+      setIsSubmittingApplication(true);
+      try {
+        // If a draft already exists in DB, delete it first
+        if (draftApplicationId) {
+          await cancelApplication(draftApplicationId, user.id).catch(() => {});
+        }
+        const { applicationId } = await createApplication(user.id, {
+          studentTckn: data.tckn ?? user.tckn,
+          studentFullName: `${data.name ?? ''} ${data.surname ?? ''}`.trim() || user.name,
+          targetDepartmentId: data.targetProgram || 'DRAFT',
+          targetFacultyId: 'faculty-engineering',
+          transferType: data.transferType || 'DRAFT',
+          targetSemester: Number(data.targetSemester) || 0,
+          submittedGpa: Number(data.gpa) || 0,
+          submittedYksScore: data.osymScore ? Number(data.osymScore) : undefined,
+          yksExamYear: data.osymYear ? Number(data.osymYear) : undefined,
+          currentInstitution: data.institution,
+          currentDepartment: data.department,
+          isDraft: true,
+        });
+        localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(data));
+        localStorage.setItem(DRAFT_STORAGE_KEY + '_id', applicationId);
+        setDraftData(data);
+        setDraftApplicationId(applicationId);
+        setCurrentView('dashboard');
+        // Refresh application list
+        listApplications(user.id).then(setApplications).catch(() => {});
+      } catch (e) {
+        setApplicationError(e instanceof Error ? e.message : 'Taslak kaydedilemedi.');
+      } finally {
+        setIsSubmittingApplication(false);
+      }
+      return;
+    }
+
+    // Final submission: clear draft from DB + localStorage, create real application
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    localStorage.removeItem(DRAFT_STORAGE_KEY + '_id');
+    setDraftData(undefined);
     setApplicationError(null);
     setIsSubmittingApplication(true);
     try {
+      // Cancel existing draft in DB if any
+      if (draftApplicationId) {
+        await cancelApplication(draftApplicationId, user.id).catch(() => {});
+        setDraftApplicationId(null);
+      }
       const { applicationId } = await createApplication(user.id, {
-        studentTckn: data.tckn ?? '00000000000',
+        studentTckn: data.tckn ?? user.tckn,
         studentFullName: `${data.name ?? ''} ${data.surname ?? ''}`.trim() || user.name,
-        targetDepartmentId: (data.targetProgram ?? 'unknown').toLowerCase().replace(/\s+/g, '-'),
+        targetDepartmentId: data.targetProgram ?? 'unknown',
+        targetFacultyId: 'faculty-engineering',
+        transferType: data.transferType ?? 'HORIZONTAL',
         targetSemester: Number(data.targetSemester ?? 3),
         submittedGpa: Number(data.gpa ?? 0),
         submittedYksScore: data.osymScore ? Number(data.osymScore) : undefined,
-        currentInstitution: data.currentUniversity,
-        currentDepartment: data.currentProgram,
+        yksExamYear: data.osymYear ? Number(data.osymYear) : undefined,
+        currentInstitution: data.institution,
+        currentDepartment: data.department,
       });
       setActiveApplicationId(applicationId);
       setCurrentView('upload-documents');
@@ -78,8 +141,21 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
     }
   };
 
+  const handleCancelApplication = async (applicationId: string) => {
+    if (!window.confirm('Bu başvuruyu iptal etmek istediğinizden emin misiniz?')) return;
+    try {
+      await cancelApplication(applicationId, user.id);
+      setApplications(prev => prev.filter(a => a.applicationId !== applicationId));
+      toast.success('Başvuru iptal edildi');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Başvuru iptal edilemedi');
+    }
+  };
+
   const getStatusConfig = (status: string) => {
     switch (status) {
+      case 'DRAFT':
+        return { label: 'Taslak', className: 'bg-gray-100 text-gray-700' };
       case 'PENDING_DOCUMENT_UPLOAD':
         return { label: 'Belge Bekleniyor', className: 'bg-blue-100 text-blue-800' };
       case 'RETURNED_FOR_CORRECTION':
@@ -122,6 +198,8 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
           <ApplicationForm
             onSave={handleFormSave}
             onCancel={() => setCurrentView('dashboard')}
+            draftData={draftData}
+            userTckn={user.tckn}
           />
         </div>
       );
@@ -200,6 +278,44 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
     // Default Dashboard/Applications view
     return (
       <div className="space-y-6">
+        {/* Period / general error banner */}
+        {applicationError && currentView === 'dashboard' && (
+          <div className="flex items-center gap-2 p-4 rounded-md bg-red-50 border border-red-200 text-red-700 text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {applicationError}
+          </div>
+        )}
+
+        {/* Draft resume banner */}
+        {draftData && (
+          <div className="flex items-center justify-between p-4 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>
+                Kaydedilmiş bir taslak başvurunuz var
+                {draftData.targetProgram ? ` (${draftData.targetProgram})` : ''}.
+                Kaldığınız yerden devam edebilirsiniz.
+              </span>
+            </div>
+            <div className="flex gap-2 ml-4 shrink-0">
+              <Button size="sm" variant="outline" onClick={async () => {
+                if (draftApplicationId) {
+                  await cancelApplication(draftApplicationId, user.id).catch(() => {});
+                  setDraftApplicationId(null);
+                }
+                localStorage.removeItem(DRAFT_STORAGE_KEY);
+                localStorage.removeItem(DRAFT_STORAGE_KEY + '_id');
+                setDraftData(undefined);
+                listApplications(user.id).then(setApplications).catch(() => {});
+              }}>
+                Sil
+              </Button>
+              <Button size="sm" style={{ backgroundColor: '#C00000' }} onClick={() => setCurrentView('new-application')}>
+                Devam Et
+              </Button>
+            </div>
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -208,7 +324,15 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
           </div>
           <Button
             style={{ backgroundColor: '#C00000' }}
-            onClick={() => setCurrentView('new-application')}
+            onClick={async () => {
+              const period = await getActivePeriod();
+              if (!period || !period.isActive) {
+                setApplicationError('Şu anda aktif bir başvuru dönemi bulunmamaktadır. Lütfen daha sonra tekrar deneyiniz.');
+                return;
+              }
+              setApplicationError(null);
+              setCurrentView('new-application');
+            }}
           >
             <Plus className="w-4 h-4 mr-2" />
             Yeni Başvuru Oluştur
@@ -341,6 +465,16 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
                               <Eye className="w-4 h-4 mr-1" />
                               Takip Et
                             </Button>
+                            {canContinueUpload && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={() => handleCancelApplication(app.applicationId)}
+                              >
+                                İptal Et
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>

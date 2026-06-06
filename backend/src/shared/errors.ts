@@ -46,3 +46,15 @@ export class ServiceUnavailableError extends AppError {
     super(503, code, message);
   }
 }
+
+export class LockedError extends AppError {
+  constructor(message: string, code = "ACCOUNT_LOCKED") {
+    super(423, code, message);
+  }
+}
+
+export class TooManyRequestsError extends AppError {
+  constructor(message: string, code = "RATE_LIMITED") {
+    super(429, code, message);
+  }
+}

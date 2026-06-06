@@ -72,9 +72,11 @@ export default function App() {
     localStorage.removeItem('selectedRole');
   };
 
-  // Not logged in
+  // Not logged in. A password-reset link (?token=...) opens the reset screen directly.
   if (!user) {
-    return <LoginScreen onLogin={handleLogin} />;
+    const resetToken =
+      typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') : null;
+    return <LoginScreen onLogin={handleLogin} initialResetToken={resetToken} />;
   }
 
   // Multiple roles but none selected
