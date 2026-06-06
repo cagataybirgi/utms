@@ -40,7 +40,6 @@ const SEED_PASSWORDS: Record<string, string> = {
   "user-ygk-cmpe-1": "ygk123",
   "user-ygk-chair-cmpe": "ygkchair123",
   "user-deans-eng": "dean123",
-  "user-board-eng": "board123",
   "user-admin": "admin123",
   "student-ahmet-yilmaz": "ValidPass1!",
 };
@@ -77,14 +76,6 @@ export function buildSeedUsers(): User[] {
       fullName: "Deans Office Engineering",
       email: "deans-eng@iyte.edu.tr",
       roles: [UserRole.DeansOfficeStaff],
-      facultyId: FACULTY_ENG,
-    },
-    {
-      userId: "user-board-eng",
-      tckn: "55555555555",
-      fullName: "Fakulte Kurulu Uyesi",
-      email: "board-eng@iyte.edu.tr",
-      roles: [UserRole.FacultyBoardMember],
       facultyId: FACULTY_ENG,
     },
     {
