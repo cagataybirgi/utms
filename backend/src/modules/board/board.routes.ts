@@ -37,6 +37,8 @@ export function buildBoardRouter(container: AppContainer): Router {
 
   // The Faculty Board endpoints are gated to board members and admins.
   // The Dean signature endpoints are reachable to dean's office staff too.
+  // Read-only package views are widened so Dean (pre-signature) and ÖİDB
+  // (pre-publish) can also see the package without needing duplicate routes.
   const boardRoles = requireRoles(
     UserRole.FacultyBoardMember,
     UserRole.SystemAdmin,
@@ -46,22 +48,33 @@ export function buildBoardRouter(container: AppContainer): Router {
     UserRole.FacultyBoardMember,
     UserRole.SystemAdmin,
   );
+  const packageViewerRoles = requireRoles(
+    UserRole.DeansOfficeStaff,
+    UserRole.FacultyBoardMember,
+    UserRole.OidbOfficer,
+    UserRole.SystemAdmin,
+  );
 
   // ── Queue / detail ────────────────────────────────────────────────────────
-  r.get("/packages", boardRoles, controller.listQueue);
-  r.get("/packages/:packageId", boardRoles, controller.getDetail);
+  r.get("/packages", packageViewerRoles, controller.listQueue);
+  r.get("/packages/:packageId", packageViewerRoles, controller.getDetail);
 
   // ── TC-7B ─────────────────────────────────────────────────────────────────
   r.get(
     "/packages/:packageId/intibak-check",
-    boardRoles,
+    packageViewerRoles,
     asyncHandler(controller.intibakCompleteness),
+  );
+  r.post(
+    "/packages/:packageId/return-to-ygk",
+    signatureRoles,
+    controller.returnToYgkForClarification,
   );
 
   // ── 702-HASH ──────────────────────────────────────────────────────────────
   r.get(
     "/packages/:packageId/hash-check",
-    boardRoles,
+    packageViewerRoles,
     controller.hashCheck,
   );
   r.post(
@@ -79,7 +92,7 @@ export function buildBoardRouter(container: AppContainer): Router {
   r.post(
     "/packages/:packageId/verify-signature",
     signatureRoles,
-    controller.verifySignature,
+    asyncHandler(controller.verifySignature),
   );
 
   // ── TC-7A / TC-7E ─────────────────────────────────────────────────────────
@@ -87,6 +100,11 @@ export function buildBoardRouter(container: AppContainer): Router {
     "/packages/:packageId/board-decision",
     boardRoles,
     asyncHandler(controller.boardDecision),
+  );
+  r.post(
+    "/packages/:packageId/confirm-for-publication",
+    boardRoles,
+    asyncHandler(controller.confirmForPublication),
   );
 
   // ── TC-571-NOTIFY ─────────────────────────────────────────────────────────

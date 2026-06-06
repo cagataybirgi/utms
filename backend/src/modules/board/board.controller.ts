@@ -30,6 +30,10 @@ const PublishSchema = z.object({
   publishedBy: z.string().optional(),    // falls back to authUser.userId
 });
 
+const ReturnForClarificationSchema = z.object({
+  note: z.string().min(1, "Clarification note is required."),
+});
+
 export class BoardController {
   constructor(private readonly service: BoardService) {}
 
@@ -91,11 +95,11 @@ export class BoardController {
     res.json(result);
   };
 
-  verifySignature = (req: Request, res: Response): void => {
+  verifySignature = async (req: Request, res: Response): Promise<void> => {
     this.requireUser(req);
     const { packageId } = req.params;
     const body = SignatureVerifySchema.parse(req.body);
-    const result = this.service.verifyDeanSignature({
+    const result = await this.service.verifyDeanSignature({
       packageId,
       token: body.token,
       signatoryId: body.signatoryId,
@@ -109,6 +113,32 @@ export class BoardController {
       });
       return;
     }
+    res.json(result);
+  };
+
+  // ─── TC-7B  —  Return to YGK with clarification note ───────────────────────
+
+  returnToYgkForClarification = (req: Request, res: Response): void => {
+    const userId = this.requireUser(req);
+    const { packageId } = req.params;
+    const body = ReturnForClarificationSchema.parse(req.body);
+    const result = this.service.returnToYgkForClarification({
+      packageId,
+      requestedBy: userId,
+      note: body.note,
+    });
+    res.json(result);
+  };
+
+  // ─── TC-7A Step 4  —  Confirm for Publication ──────────────────────────────
+
+  confirmForPublication = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.requireUser(req);
+    const { packageId } = req.params;
+    const result = await this.service.confirmForPublication({
+      packageId,
+      confirmedBy: userId,
+    });
     res.json(result);
   };
 

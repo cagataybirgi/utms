@@ -16,7 +16,9 @@ export type BoardLifecycleStatus =
   | "PENDING_BOARD_REVIEW"
   | "FORWARDED_TO_BOARD"
   | "APPROVED_BY_BOARD"
+  | "READY_FOR_PUBLICATION"
   | "REJECTED_BY_BOARD"
+  | "WAITING_FOR_CLARIFICATION_YGK"
   | "LOCKED_HASH_VIOLATION"
   | "PUBLISHED";
 
@@ -68,6 +70,9 @@ export interface BoardReviewState {
   hashLocked: boolean;          // true when 702-HASH check has failed
   hashLockedAt: string | null;
   hashLockReason: string | null;
+  // TC-7B — note written by the Dean's office when returning to YGK because
+  // an intibak table is missing.  Cleared on YGK re-send.
+  clarificationNote: string | null;
   publishedAt: string | null;
   notifications: BoardNotificationStub[];
   createdAt: string;
@@ -85,13 +90,42 @@ export interface IBoardReviewStateRepository {
 
 // ─── Request / Response DTOs used by the controller ─────────────────────────
 
-// TC-7B (executes inside intibak.service.sendPackage — see below)
+// TC-7B / TC-7D — gate fires at YGK send, Dean signature, and Board approve.
 export interface IntibakCompletenessResult {
   packageId: string;
   totalAsil: number;
   missingApplicationIds: string[];
+  missingStudentNames: string[];
   isComplete: boolean;
   blockedBy: "INTIBAK_GATE" | null;
+}
+
+// TC-7B — Dean returns the package to YGK with a clarification note.
+export interface ReturnForClarificationInput {
+  packageId: string;
+  requestedBy: string;
+  note: string;
+}
+
+export interface ReturnForClarificationResult {
+  packageId: string;
+  newLifecycle: BoardLifecycleStatus;
+  note: string;
+  returnedAt: string;
+  notifications: BoardNotificationStub[];
+}
+
+// TC-7A Step 4 — Board confirms approved results for publication (ÖİDB handoff).
+export interface ConfirmForPublicationInput {
+  packageId: string;
+  confirmedBy: string;
+}
+
+export interface ConfirmForPublicationResult {
+  packageId: string;
+  newLifecycle: BoardLifecycleStatus;
+  confirmedAt: string;
+  message: string;
 }
 
 // TC-702-HASH

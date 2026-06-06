@@ -404,6 +404,7 @@ export class IntibakService {
       hashLocked: false,
       hashLockedAt: null,
       hashLockReason: null,
+      clarificationNote: null,
       publishedAt: null,
       notifications: [],
       createdAt: now,

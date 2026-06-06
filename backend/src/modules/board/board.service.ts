@@ -22,6 +22,8 @@ import {
   BoardDecisionResult,
   BoardNotificationStub,
   BoardReviewState,
+  ConfirmForPublicationInput,
+  ConfirmForPublicationResult,
   DeanSignature,
   HashCheckResult,
   IBoardReviewStateRepository,
@@ -29,6 +31,8 @@ import {
   LoopbackTarget,
   PublishInput,
   PublishResult,
+  ReturnForClarificationInput,
+  ReturnForClarificationResult,
   SignatureIssueResult,
   SignatureVerifyInput,
   SignatureVerifyResult,
@@ -110,31 +114,58 @@ export class BoardService {
         packageId,
         totalAsil: 0,
         missingApplicationIds: [],
+        missingStudentNames: [],
         isComplete: false,
         blockedBy: "INTIBAK_GATE",
       };
     }
 
-    const missing: string[] = [];
+    const missingIds: string[] = [];
+    const missingNames: string[] = [];
     for (const applicationId of pkg.asilApplicationIds) {
       const app = await this.deps.applications.findById(applicationId);
       if (!app || !app.intibakTableId) {
-        missing.push(applicationId);
+        missingIds.push(applicationId);
+        missingNames.push(app?.studentFullName ?? applicationId);
         continue;
       }
       const table = this.deps.intibakTables.findById(app.intibakTableId);
       if (!table || !table.isLocked || !table.savedAt) {
-        missing.push(applicationId);
+        missingIds.push(applicationId);
+        missingNames.push(app.studentFullName);
       }
     }
 
     return {
       packageId,
       totalAsil: pkg.asilApplicationIds.length,
-      missingApplicationIds: missing,
-      isComplete: missing.length === 0,
-      blockedBy: missing.length > 0 ? "INTIBAK_GATE" : null,
+      missingApplicationIds: missingIds,
+      missingStudentNames: missingNames,
+      isComplete: missingIds.length === 0,
+      blockedBy: missingIds.length > 0 ? "INTIBAK_GATE" : null,
     };
+  }
+
+  /**
+   * Shared gate used by TC-7B (Dean signature) and TC-7D (Board approval) to
+   * block the workflow when any Asil applicant's intibak table is incomplete.
+   * Includes student names in the error message so the actor can identify the
+   * affected record without an extra round-trip.
+   */
+  private async assertIntibakComplete(
+    packageId: string,
+    context: "DEAN_SIGNATURE" | "BOARD_APPROVAL",
+  ): Promise<void> {
+    const completeness = await this.checkIntibakCompleteness(packageId);
+    if (completeness.isComplete) return;
+
+    const names = completeness.missingStudentNames.join(", ");
+    const plural = completeness.missingStudentNames.length > 1 ? "s" : "";
+    const message =
+      context === "DEAN_SIGNATURE"
+        ? `Cannot forward to Faculty Board: intibak data missing for student${plural} ${names}. Return to Evaluation Committee for clarification.`
+        : `Final Safety Gate Error: Inconsistent data detected for student${plural} ${names}. Please refresh the list before signing.`;
+    throw new ConflictError("INTIBAK_GATE", message);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -248,7 +279,7 @@ export class BoardService {
     };
   }
 
-  verifyDeanSignature(input: SignatureVerifyInput): SignatureVerifyResult {
+  async verifyDeanSignature(input: SignatureVerifyInput): Promise<SignatureVerifyResult> {
     const pkg = this.deps.packages.findById(input.packageId);
     if (!pkg) {
       return this.signatureFailure(
@@ -294,6 +325,10 @@ export class BoardService {
         "Cannot apply signature on a 702-HASH-locked package.",
       );
     }
+
+    // TC-7B — Dean cannot forward an incomplete package.  Token stays valid
+    // so the Dean can retry after YGK fixes the intibak table.
+    await this.assertIntibakComplete(input.packageId, "DEAN_SIGNATURE");
 
     const documentHash = computePackageHash(this.canonicalInput(pkg));
     state.deanSignature = this.buildSignature(
@@ -362,9 +397,131 @@ export class BoardService {
       );
     }
 
+    // TC-7D — Final Safety Gate: re-check intibak completeness right before
+    // the approval is committed.  Tampering with an intibak row between Dean
+    // signature and Board approval is caught here.
+    if (input.approved) {
+      await this.assertIntibakComplete(input.packageId, "BOARD_APPROVAL");
+    }
+
     return input.approved
       ? this.approvePath(pkg, state, input)
       : this.rejectPath(pkg, state, input);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   TC-7A Step 4  —  Confirm for Publication  (ÖİDB handoff)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Faculty Board flips an APPROVED_BY_BOARD package into READY_FOR_PUBLICATION,
+   * staging it for the ÖİDB officer to publish.  Application statuses move to
+   * ReadyForPublication so the student dashboards reflect the imminent
+   * announcement.  See TC-7A Step 4.
+   */
+  async confirmForPublication(input: ConfirmForPublicationInput): Promise<ConfirmForPublicationResult> {
+    const pkg = this.requirePackage(input.packageId);
+    const state = this.requireBoardState(input.packageId);
+
+    if (state.lifecycle !== "APPROVED_BY_BOARD") {
+      throw new ConflictError(
+        "INVALID_LIFECYCLE",
+        `Confirm-for-publication requires APPROVED_BY_BOARD. Current: '${state.lifecycle}'.`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    state.lifecycle = "READY_FOR_PUBLICATION";
+    this.deps.boardStates.save(state);
+
+    for (const appId of [...pkg.asilApplicationIds, ...pkg.yedekApplicationIds]) {
+      const app = await this.deps.applications.findById(appId);
+      if (!app) continue;
+      app.currentStatus = ApplicationStatus.ReadyForPublication;
+      app.lastModifiedAt = now;
+      await this.deps.applications.save(app);
+    }
+
+    this.deps.audit.write({
+      actorUserId: input.confirmedBy,
+      actorRole: UserRole.FacultyBoardMember,
+      actionType: "CONFIRM_FOR_PUBLICATION",
+      affectedEntityId: pkg.packageId,
+      affectedEntityType: "EvaluationPackage",
+      previousValue: { lifecycle: "APPROVED_BY_BOARD" },
+      newValue: { lifecycle: "READY_FOR_PUBLICATION", forwardedToOidbAt: now },
+    });
+
+    return {
+      packageId: pkg.packageId,
+      newLifecycle: "READY_FOR_PUBLICATION",
+      confirmedAt: now,
+      message: "Results forwarded to ÖİDB for final publication.",
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   TC-7B  —  Return to YGK with clarification note
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Dean's office returns the package to YGK when an intibak table is missing
+   * (TC-7B Step 3).  Resets the package to Draft so YGK can re-send after the
+   * fix, stores the clarification note on the board state for UI display, and
+   * decouples the YGK Chair notification (same pattern as 571-NOTIFY).
+   */
+  returnToYgkForClarification(input: ReturnForClarificationInput): ReturnForClarificationResult {
+    const pkg = this.requirePackage(input.packageId);
+    const state = this.requireBoardState(input.packageId);
+
+    if (!input.note?.trim()) {
+      throw new ValidationError(
+        "Clarification note is required when returning to evaluation committee.",
+      );
+    }
+    if (state.lifecycle !== "PENDING_BOARD_REVIEW") {
+      throw new ConflictError(
+        "INVALID_LIFECYCLE",
+        `Return-to-YGK is only allowed before Dean signature (PENDING_BOARD_REVIEW). Current: '${state.lifecycle}'.`,
+      );
+    }
+
+    const note = input.note.trim();
+    const returnedAt = new Date().toISOString();
+
+    state.lifecycle = "WAITING_FOR_CLARIFICATION_YGK";
+    state.clarificationNote = note;
+    this.deps.boardStates.save(state);
+
+    // Allow YGK to re-send after fixing.
+    pkg.status = PackageStatus.Draft;
+    this.deps.packages.save(pkg);
+
+    const ygkNotif = this.dispatchDecoupled(state, {
+      recipientUserId: "YGK_CHAIR",
+      eventType: "PACKAGE_RETURNED_FOR_CLARIFICATION",
+      channel: "EMAIL",
+      subject: `Package returned for clarification — ${pkg.packageId}`,
+      body: note,
+    });
+
+    this.deps.audit.write({
+      actorUserId: input.requestedBy,
+      actorRole: UserRole.DeansOfficeStaff,
+      actionType: "RETURN_TO_YGK_FOR_CLARIFICATION",
+      affectedEntityId: pkg.packageId,
+      affectedEntityType: "BoardReviewState",
+      previousValue: { lifecycle: "PENDING_BOARD_REVIEW" },
+      newValue: { lifecycle: "WAITING_FOR_CLARIFICATION_YGK", note },
+    });
+
+    return {
+      packageId: pkg.packageId,
+      newLifecycle: "WAITING_FOR_CLARIFICATION_YGK",
+      note,
+      returnedAt,
+      notifications: [ygkNotif],
+    };
   }
 
   // TC-7A — approval path
@@ -546,10 +703,10 @@ export class BoardService {
     const pkg = this.requirePackage(input.packageId);
     const state = this.requireBoardState(input.packageId);
 
-    if (state.lifecycle !== "APPROVED_BY_BOARD") {
+    if (state.lifecycle !== "READY_FOR_PUBLICATION") {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `Publish requires APPROVED_BY_BOARD. Current: '${state.lifecycle}'.`,
+        `Publish requires READY_FOR_PUBLICATION. Current: '${state.lifecycle}'.`,
       );
     }
 
@@ -573,7 +730,7 @@ export class BoardService {
       actionType: "PUBLISH",
       affectedEntityId: pkg.packageId,
       affectedEntityType: "EvaluationPackage",
-      previousValue: { lifecycle: "APPROVED_BY_BOARD" },
+      previousValue: { lifecycle: "READY_FOR_PUBLICATION" },
       newValue: { lifecycle: "PUBLISHED", publishedAt },
     });
 
