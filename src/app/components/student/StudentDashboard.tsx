@@ -426,6 +426,7 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
                   {applications.map((app) => {
                     const statusConfig = getStatusConfig(app.currentStatus);
                     const canContinueUpload = app.currentStatus === 'PENDING_DOCUMENT_UPLOAD' || app.currentStatus === 'RETURNED_FOR_CORRECTION';
+                    const isDraft = app.currentStatus === 'DRAFT';
                     return (
                       <tr key={app.applicationId} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="py-3 px-4 text-xs text-gray-500 font-mono">{app.applicationId.slice(0, 8)}…</td>
@@ -442,6 +443,27 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
                         </td>
                         <td className="py-3 px-4">
                           <div className="flex items-center space-x-2">
+                            {isDraft && (
+                              <Button
+                                size="sm"
+                                style={{ backgroundColor: '#C00000' }}
+                                onClick={() => {
+                                  // If localStorage draft belongs to a different app, clear its form data
+                                  const savedId = localStorage.getItem(DRAFT_STORAGE_KEY + '_id');
+                                  if (savedId !== app.applicationId) {
+                                    localStorage.removeItem(DRAFT_STORAGE_KEY);
+                                    setDraftData(undefined);
+                                  }
+                                  // Register this app as the active draft so re-saving cancels it first
+                                  setDraftApplicationId(app.applicationId);
+                                  localStorage.setItem(DRAFT_STORAGE_KEY + '_id', app.applicationId);
+                                  setCurrentView('new-application');
+                                }}
+                              >
+                                <FileText className="w-3 h-3 mr-1" />
+                                Devam Et
+                              </Button>
+                            )}
                             {canContinueUpload && (
                               <Button
                                 size="sm"
@@ -455,18 +477,20 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
                                 Belge Yükle
                               </Button>
                             )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setSelectedAppId(app.applicationId);
-                                setCurrentView('view-timeline');
-                              }}
-                            >
-                              <Eye className="w-4 h-4 mr-1" />
-                              Takip Et
-                            </Button>
-                            {canContinueUpload && (
+                            {!isDraft && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedAppId(app.applicationId);
+                                  setCurrentView('view-timeline');
+                                }}
+                              >
+                                <Eye className="w-4 h-4 mr-1" />
+                                Takip Et
+                              </Button>
+                            )}
+                            {(isDraft || canContinueUpload) && (
                               <Button
                                 size="sm"
                                 variant="outline"
