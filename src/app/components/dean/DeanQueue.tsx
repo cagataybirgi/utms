@@ -5,7 +5,7 @@ import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
 import { Input } from '../ui/input';
 import {
-  Eye, Clock, Search, Send, RotateCcw,
+  Eye, Clock, Search, Send,
   Building2, GraduationCap, AlertTriangle, CheckCircle2, XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -89,15 +89,6 @@ export function DeanQueue({ userFacultyId }: DeanQueueProps) {
     } finally {
       setLoading(false);
     }
-  };
-
-  // DEV-ONLY
-  const handleReset = async () => {
-    await fetch('/api/dev/reset', { method: 'POST', headers: headers() });
-    toast.success('Test verileri sıfırlandı');
-    setSelectedApp(null);
-    setShowReturnNote(false);
-    await fetchQueue();
   };
 
   const facultyMismatch = (app: QueueApp): boolean => {
@@ -298,17 +289,9 @@ export function DeanQueue({ userFacultyId }: DeanQueueProps) {
   // ── Queue List View ──────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-gray-900 mb-2">Dean Ofisi İnceleme Kuyruğu</h2>
-          <p className="text-gray-600">YGK'ya iletilecek başvuruları inceleyin</p>
-        </div>
-        {/* DEV-ONLY: remove before submission */}
-        <Button variant="outline" size="sm" onClick={handleReset}
-          className="text-orange-600 border-orange-300 hover:bg-orange-50 shrink-0">
-          <RotateCcw className="w-4 h-4 mr-1.5" />
-          Test Sıfırla
-        </Button>
+      <div>
+        <h2 className="text-gray-900 mb-2">Dean Ofisi İnceleme Kuyruğu</h2>
+        <p className="text-gray-600">YGK'ya iletilecek başvuruları inceleyin</p>
       </div>
 
       {/* Stats */}

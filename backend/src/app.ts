@@ -9,8 +9,6 @@ import { buildApplicationRouter } from "./modules/application/application.routes
 import { buildRankingRouter } from "./modules/ranking/ranking.routes";
 import { buildDeanRouter } from "./modules/dean/dean.routes";
 import { buildAuthRouter } from "./modules/auth/auth.routes";
-// DEV-ONLY: remove this import before submission
-import { seedAll } from "./mocks/seed-data";
 
 export interface CreateAppOptions {
   container?: AppContainer;
@@ -35,22 +33,6 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
 
   app.get("/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", scope: "Scenario 1 (Login) & Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 5 (Ranking) & Scenario 6 (Intibak)" });
-  });
-
-  // DEV-ONLY: reset all in-memory data back to seed state — remove before submission
-  app.post("/api/dev/reset", (_req: Request, res: Response) => {
-    container.applications.clear();
-    container.documents.clear();
-    container.intibakTables.clear();
-    container.packages.clear();
-    container.quotas.clear();
-    container.audit.clear();
-    container.notifications.clear();
-    container.users.clear();
-    container.curriculum.clear();
-    container.auth.clear();
-    seedAll(container);
-    res.json({ message: "Test verileri sıfırlandı" });
   });
 
   // Scenario 1 (Login) — pre-authentication endpoints, mounted before mock-auth.

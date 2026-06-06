@@ -7,10 +7,8 @@ import {
   Search,
   Eye,
   Clock,
-  CheckCircle2,
-  RotateCcw
+  CheckCircle2
 } from 'lucide-react';
-import { toast } from 'sonner';
 
 interface QueueApplication {
   applicationId: string;
@@ -62,17 +60,6 @@ export function YGKQueue({ onOpenApplication }: YGKQueueProps) {
       console.error('Error fetching queue:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  // DEV-ONLY: remove before submission
-  const handleReset = async () => {
-    try {
-      await fetch('/api/dev/reset', { method: 'POST', headers: getAuthHeaders() });
-      toast.success('Test verileri sıfırlandı');
-      await fetchQueue();
-    } catch {
-      toast.error('Sıfırlama başarısız');
     }
   };
 
@@ -133,22 +120,9 @@ export function YGKQueue({ onOpenApplication }: YGKQueueProps) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-gray-900 mb-2">YGK İnceleme Kuyruğu</h2>
-          <p className="text-gray-600">Transfer başvurularını inceleyin ve akademik uygunluk değerlendirmesi yapın</p>
-        </div>
-        {/* DEV-ONLY: remove before submission */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleReset}
-          className="text-orange-600 border-orange-300 hover:bg-orange-50 shrink-0"
-          title="Tüm test verilerini sıfırla (DEV)"
-        >
-          <RotateCcw className="w-4 h-4 mr-1.5" />
-          Test Sıfırla
-        </Button>
+      <div>
+        <h2 className="text-gray-900 mb-2">YGK İnceleme Kuyruğu</h2>
+        <p className="text-gray-600">Transfer başvurularını inceleyin ve akademik uygunluk değerlendirmesi yapın</p>
       </div>
 
       {/* Statistics */}
