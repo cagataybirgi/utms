@@ -160,11 +160,10 @@ export class BoardService {
     if (completeness.isComplete) return;
 
     const names = completeness.missingStudentNames.join(", ");
-    const plural = completeness.missingStudentNames.length > 1 ? "s" : "";
     const message =
       context === "DEAN_SIGNATURE"
-        ? `Cannot forward to Faculty Board: intibak data missing for student${plural} ${names}. Return to Evaluation Committee for clarification.`
-        : `Final Safety Gate Error: Inconsistent data detected for student${plural} ${names}. Please refresh the list before signing.`;
+        ? `Fakülte Kuruluna yönlendirme yapılamaz: ${names} için intibak verisi eksik. Açıklama notu ile Değerlendirme Komisyonuna iade edin.`
+        : `Son Güvenlik Kontrolü Hatası: ${names} için tutarsız veri tespit edildi. Lütfen imzalamadan önce listeyi yenileyin.`;
     throw new ConflictError("INTIBAK_GATE", message);
   }
 
@@ -232,7 +231,7 @@ export class BoardService {
     if (!state.hashLocked) {
       throw new ConflictError(
         "NOT_LOCKED",
-        "Package is not in a 702-HASH locked state.",
+        "Paket 702-HASH kilitli durumda değil.",
       );
     }
 
@@ -286,7 +285,7 @@ export class BoardService {
         input.packageId,
         input.token,
         "7C-INVALID",
-        "Package not found.",
+        "Paket bulunamadı.",
       );
     }
 
@@ -296,7 +295,7 @@ export class BoardService {
         input.packageId,
         input.token,
         "7C-INVALID",
-        "Token not recognised.",
+        "Token tanınmadı.",
       );
     }
     if (entry.signatoryId !== input.signatoryId) {
@@ -304,7 +303,7 @@ export class BoardService {
         input.packageId,
         input.token,
         "7C-INVALID",
-        `Token issued to ${entry.signatoryId} — submitted by ${input.signatoryId}.`,
+        `Token ${entry.signatoryId} kullanıcısına verildi — ${input.signatoryId} tarafından gönderildi.`,
       );
     }
     const ageMs = Date.now() - entry.issuedAt.getTime();
@@ -313,7 +312,7 @@ export class BoardService {
         input.packageId,
         input.token,
         "7C-EXPIRED",
-        `Token expired ${Math.floor(ageMs / 3600000)}h ago — re-issue required.`,
+        `Token ${Math.floor(ageMs / 3600000)} saat önce süresi doldu — yeniden alınması gerekir.`,
       );
     }
 
@@ -322,7 +321,7 @@ export class BoardService {
     if (state.hashLocked) {
       throw new ConflictError(
         "HASH_LOCKED",
-        "Cannot apply signature on a 702-HASH-locked package.",
+        "702-HASH ile kilitli bir pakete imza uygulanamaz.",
       );
     }
 
@@ -356,7 +355,7 @@ export class BoardService {
       token: input.token,
       state: "valid",
       errorCode: null,
-      message: "Signature verified. Package cleared for Faculty Board review.",
+      message: "İmza doğrulandı. Paket Fakülte Kurulu incelemesine açıldı.",
       clearedAt: new Date().toISOString(),
     };
   }
@@ -374,7 +373,7 @@ export class BoardService {
     if (!hashCheck.isMatch) {
       throw new ConflictError(
         "702-HASH",
-        "Decision blocked by 702-HASH integrity violation. Restore data and re-sign.",
+        "Karar 702-HASH bütünlük ihlali nedeniyle engellendi. Veriyi düzelttikten sonra yeniden imzalayın.",
       );
     }
 
@@ -382,7 +381,7 @@ export class BoardService {
     if (!state.deanSignature || state.deanSignature.state !== "valid") {
       throw new ConflictError(
         "SIGNATURE_REQUIRED",
-        "Dean's signature missing or invalid (Error 7C). Cannot decide.",
+        "Dekan imzası eksik veya geçersiz (Hata 7C). Karar verilemez.",
       );
     }
 
@@ -393,7 +392,7 @@ export class BoardService {
     ) {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `Cannot decide a package in lifecycle '${state.lifecycle}'.`,
+        `'${state.lifecycle}' durumundaki bir paket için karar verilemez.`,
       );
     }
 
@@ -426,7 +425,7 @@ export class BoardService {
     if (state.lifecycle !== "APPROVED_BY_BOARD") {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `Confirm-for-publication requires APPROVED_BY_BOARD. Current: '${state.lifecycle}'.`,
+        `Yayın onayı için paketin 'APPROVED_BY_BOARD' durumunda olması gerekir. Mevcut durum: '${state.lifecycle}'.`,
       );
     }
 
@@ -456,7 +455,7 @@ export class BoardService {
       packageId: pkg.packageId,
       newLifecycle: "READY_FOR_PUBLICATION",
       confirmedAt: now,
-      message: "Results forwarded to ÖİDB for final publication.",
+      message: "Sonuçlar nihai yayın için ÖİDB'ye iletildi.",
     };
   }
 
@@ -476,13 +475,13 @@ export class BoardService {
 
     if (!input.note?.trim()) {
       throw new ValidationError(
-        "Clarification note is required when returning to evaluation committee.",
+        "Değerlendirme Komisyonuna iade ederken açıklama notu zorunludur.",
       );
     }
     if (state.lifecycle !== "PENDING_BOARD_REVIEW") {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `Return-to-YGK is only allowed before Dean signature (PENDING_BOARD_REVIEW). Current: '${state.lifecycle}'.`,
+        `YGK'ya iade işlemi yalnızca Dekan imzasından önce (PENDING_BOARD_REVIEW durumunda) yapılabilir. Mevcut durum: '${state.lifecycle}'.`,
       );
     }
 
@@ -501,7 +500,7 @@ export class BoardService {
       recipientUserId: "YGK_CHAIR",
       eventType: "PACKAGE_RETURNED_FOR_CLARIFICATION",
       channel: "EMAIL",
-      subject: `Package returned for clarification — ${pkg.packageId}`,
+      subject: `Paket açıklama için iade edildi — ${pkg.packageId}`,
       body: note,
     });
 
@@ -601,7 +600,7 @@ export class BoardService {
   ): Promise<BoardDecisionResult> {
     if (!input.rejectionReason?.trim()) {
       throw new ValidationError(
-        "rejectionReason is required when approved is false.",
+        "Reddedildiğinde (approved: false) red gerekçesi zorunludur.",
       );
     }
 
@@ -643,7 +642,7 @@ export class BoardService {
       recipientUserId: "DEAN_OFFICE",
       eventType: "BOARD_REJECTION",
       channel: "EMAIL",
-      subject: `Board Rejection — ${pkg.packageId} returned to ${target.toUpperCase()}`,
+      subject: `Fakülte Kurulu Reddi — ${pkg.packageId} ${target.toUpperCase()} birimine iade edildi`,
       body: input.rejectionReason,
     });
 
@@ -706,7 +705,7 @@ export class BoardService {
     if (state.lifecycle !== "READY_FOR_PUBLICATION") {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `Publish requires READY_FOR_PUBLICATION. Current: '${state.lifecycle}'.`,
+        `Yayınlama için paketin 'READY_FOR_PUBLICATION' durumunda olması gerekir. Mevcut durum: '${state.lifecycle}'.`,
       );
     }
 
@@ -743,8 +742,8 @@ export class BoardService {
         recipientUserId: appId,
         eventType: "RESULT_ADMITTED",
         channel: "EMAIL",
-        subject: "Transfer Acceptance",
-        body: "Your transfer application has been approved by the Faculty Board.",
+        subject: "Yatay Geçiş Kabulü",
+        body: "Yatay geçiş başvurunuz Fakülte Kurulu tarafından onaylanmıştır.",
       });
       stubs.push(stub);
       if (stub.status === "failed") anyFailed = true;
@@ -754,8 +753,8 @@ export class BoardService {
         recipientUserId: appId,
         eventType: "RESULT_WAITLISTED",
         channel: "EMAIL",
-        subject: "Waitlist Notification",
-        body: "You are on the waitlist for transfer.",
+        subject: "Yedek Listesi Bildirimi",
+        body: "Yatay geçiş için yedek listesindesiniz.",
       });
       stubs.push(stub);
       if (stub.status === "failed") anyFailed = true;
@@ -771,8 +770,8 @@ export class BoardService {
       hasNotifyErrors: anyFailed,
       notifyErrorCode: anyFailed ? "571-NOTIFY" : null,
       message: anyFailed
-        ? "Results published. Some notifications failed (571-NOTIFY) — publish unaffected."
-        : "Results published successfully. All notifications delivered.",
+        ? "Sonuçlar yayınlandı. Bazı bildirimler gönderilemedi (571-NOTIFY) — yayın etkilenmedi."
+        : "Sonuçlar başarıyla yayınlandı. Tüm bildirimler iletildi.",
     };
   }
 
@@ -874,7 +873,7 @@ export class BoardService {
 
   private requirePackage(packageId: string): EvaluationPackage {
     const pkg = this.deps.packages.findById(packageId);
-    if (!pkg) throw new NotFoundError(`Package not found: ${packageId}`);
+    if (!pkg) throw new NotFoundError(`Paket bulunamadı: ${packageId}`);
     return pkg;
   }
 
@@ -882,8 +881,8 @@ export class BoardService {
     const state = this.deps.boardStates.findById(packageId);
     if (!state) {
       throw new NotFoundError(
-        `BoardReviewState not found for package: ${packageId}. ` +
-          `Has the package been forwarded to the board?`,
+        `Paket için Kurul inceleme kaydı bulunamadı: ${packageId}. ` +
+          `Paket Kurula iletildi mi?`,
       );
     }
     return state;

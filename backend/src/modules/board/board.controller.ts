@@ -9,7 +9,7 @@ const SignatureIssueSchema = z.object({
 
 const SignatureVerifySchema = z.object({
   token: z.string().regex(/^SIG-[A-Z]{3}-\d{8}-[A-Z0-9]+$/, {
-    message: "Token must match format SIG-XXX-YYYYMMDD-NNNN",
+    message: "Token şu formatta olmalıdır: SIG-XXX-YYYYMMDD-NNNN",
   }),
   signatoryId: z.string().min(1),
 });
@@ -20,7 +20,7 @@ const ClearHashLockSchema = z.object({
 });
 
 const BoardDecisionSchema = z.object({
-  resolutionText: z.string().min(1, "Resolution text is required."),
+  resolutionText: z.string().min(1, "Karar metni zorunludur."),
   approved: z.boolean(),
   rejectionReason: z.string().optional(),
   loopbackTarget: z.enum(["oidb", "ydyo", "ygk", "dean"]).optional(),
@@ -31,7 +31,7 @@ const PublishSchema = z.object({
 });
 
 const ReturnForClarificationSchema = z.object({
-  note: z.string().min(1, "Clarification note is required."),
+  note: z.string().min(1, "Açıklama notu zorunludur."),
 });
 
 export class BoardController {
