@@ -1,249 +1,508 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Alert, AlertDescription } from '../ui/alert';
-import { AlertCircle, Save, ArrowRight, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
+import { AlertCircle, Save, ArrowRight, CheckCircle2, Loader2, ArrowLeft, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface ApplicationFormProps {
-  onSave: (data: any) => void;
-  onCancel: () => void;
+// ─── Mock external API responses ─────────────────────────────────────────────
+
+// Set to true to simulate API down scenario (Test Case 2D)
+const SIMULATE_API_DOWN = false;
+
+const API_TIMEOUT_MS = 5000;
+
+interface NviYoksisData {
+  name: string; surname: string; birthDate: string;
+  gpa: string; institution: string; department: string;
+  finishedSemester: string; finishedYear: string;
+  currentCredit: string; languagePercentage: string; languageLabel: string;
 }
 
-export function ApplicationForm({ onSave, onCancel }: ApplicationFormProps) {
-  const [formData, setFormData] = useState({
-    // Auto-filled from user profile
-    name: '',
-    surname: '',
-    tckn: '',
-    studentId: '',
-    currentUniversity: '',
-    currentProgram: '',
-    
-    // User inputs
-    targetProgram: '',
-    targetSemester: '',
-    gpa: '',
-    osymScore: '',
-    osymYear: ''
+interface MultipleEnrollment {
+  programs: Array<{ id: string; label: string; data: NviYoksisData }>;
+}
+
+// TCKNs that return multiple YÖKSİS enrollment records (double major scenario)
+const MOCK_MULTIPLE_ENROLLMENT: Record<string, MultipleEnrollment> = {
+  '99887766554': {
+    programs: [
+      {
+        id: 'prog-1',
+        label: 'İstanbul Teknik Üniversitesi — Bilgisayar Mühendisliği',
+        data: { name: 'Can', surname: 'Yıldız', birthDate: '15/03/2002', gpa: '3.72', institution: 'İstanbul Teknik Üniversitesi', department: 'Bilgisayar Mühendisliği', finishedSemester: '4', finishedYear: '2', currentCredit: '30', languagePercentage: '100', languageLabel: 'İngilizce' },
+      },
+      {
+        id: 'prog-2',
+        label: 'İstanbul Teknik Üniversitesi — Matematik Mühendisliği (Çift Anadal)',
+        data: { name: 'Can', surname: 'Yıldız', birthDate: '15/03/2002', gpa: '3.72', institution: 'İstanbul Teknik Üniversitesi', department: 'Matematik Mühendisliği (Çift Anadal)', finishedSemester: '4', finishedYear: '2', currentCredit: '28', languagePercentage: '100', languageLabel: 'İngilizce' },
+      },
+    ],
+  },
+};
+
+const MOCK_NVI_YOKSIS: Record<string, NviYoksisData> = {
+  '12345678901': {
+    name: 'Ahmet', surname: 'Yılmaz', birthDate: '01/01/2003',
+    gpa: '3.45', institution: 'İstanbul Teknik Üniversitesi', department: 'Endüstri Mühendisliği',
+    finishedSemester: '2', finishedYear: '1', currentCredit: '15',
+    languagePercentage: '100', languageLabel: 'İngilizce',
+  },
+  '11223344556': {
+    name: 'Zeynep', surname: 'Yılmaz', birthDate: '01/01/2003',
+    gpa: '2.0', institution: 'İstanbul Teknik Üniversitesi', department: 'Endüstri Mühendisliği',
+    finishedSemester: '2', finishedYear: '1', currentCredit: '15',
+    languagePercentage: '100', languageLabel: 'İngilizce',
+  },
+};
+
+const MOCK_OSYM: Record<string, Record<string, string>> = {
+  '12345678901': { '2024': '485.50000', '2023': '472.30000', '2022': '468.12300' },
+  '11223344556': { '2024': '485.50000' },
+};
+
+async function mockApiCall<T>(
+  successValue: T,
+  fastDelayMs = 1200,
+): Promise<T | null> {
+  const result = await Promise.race<'success' | 'timeout'>([
+    new Promise(res => setTimeout(() => res('timeout'), API_TIMEOUT_MS)),
+    SIMULATE_API_DOWN
+      ? new Promise<never>(() => {})
+      : new Promise(res => setTimeout(() => res('success'), fastDelayMs)),
+  ]);
+  return result === 'success' ? successValue : null;
+}
+
+// ─── Form types ───────────────────────────────────────────────────────────────
+
+type IdentityStatus = 'idle' | 'loading' | 'verified' | 'manual';
+type OsymStatus = 'idle' | 'loading' | 'fetched' | 'manual';
+
+export interface ApplicationFormValues {
+  tckn: string;
+  name: string; surname: string; birthDate: string;
+  gpa: string; institution: string; department: string;
+  finishedSemester: string; finishedYear: string;
+  currentCredit: string; languagePercentage: string; languageLabel: string;
+  transferType: string; targetProgram: string; targetSemester: string;
+  osymYear: string; osymScore: string;
+  isDraft: boolean;
+}
+
+const EMPTY_FORM: ApplicationFormValues = {
+  tckn: '', name: '', surname: '', birthDate: '',
+  gpa: '', institution: '', department: '',
+  finishedSemester: '', finishedYear: '', currentCredit: '',
+  languagePercentage: '', languageLabel: '',
+  transferType: '', targetProgram: '', targetSemester: '',
+  osymYear: '', osymScore: '',
+  isDraft: false,
+};
+
+interface ApplicationFormProps {
+  onSave: (data: ApplicationFormValues) => void;
+  onCancel: () => void;
+  draftData?: Partial<ApplicationFormValues>;
+  userTckn?: string;
+}
+
+export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: ApplicationFormProps) {
+  const [form, setForm] = useState<ApplicationFormValues>({
+    ...EMPTY_FORM,
+    ...draftData,
+    // Always pre-fill TCKN from logged-in user
+    tckn: draftData?.tckn ?? userTckn ?? '',
   });
+  const [identityStatus, setIdentityStatus] = useState<IdentityStatus>(
+    draftData?.name ? 'verified' : 'idle',
+  );
+  const [identityWarning, setIdentityWarning] = useState<string | null>(null);
+  const [multiplePrograms, setMultiplePrograms] = useState<MultipleEnrollment['programs'] | null>(null);
+  const [osymStatus, setOsymStatus] = useState<OsymStatus>(
+    draftData?.osymScore ? 'fetched' : 'idle',
+  );
+  const [osymWarning, setOsymWarning] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [prescreenError, setPrescreenError] = useState<string | null>(null);
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isDraft, setIsDraft] = useState(true);
-  const [isLoading, setIsLoading] = useState(true);
-  const [apiDown, setApiDown] = useState(false); // Mock API status
-
-  // Simulate YÖKSİS/ÖSYM data fetch
-  useEffect(() => {
-    const fetchExternalData = async () => {
-      setIsLoading(true);
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // Mock API down scenario check
-      const mockApiDown = false; // Change to true to simulate system down
-      if (mockApiDown) {
-        setApiDown(true);
-        setIsLoading(false);
-        return;
-      }
-
-      setFormData(prev => ({
-        ...prev,
-        name: 'Ahmet',
-        surname: 'Yılmaz',
-        tckn: '12345678901',
-        studentId: '2021234567',
-        currentUniversity: 'Istanbul Technical University',
-        currentProgram: 'Industrial Engineering',
-      }));
-      setIsLoading(false);
-      toast.success('Akademik veriler YÖKSİS/ÖSYM üzerinden başarıyla çekildi');
-    };
-
-    fetchExternalData();
-  }, []);
-
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-
-    if (!formData.targetProgram) {
-      newErrors.targetProgram = 'Lütfen bir program seçiniz';
+  const updateField = (field: keyof ApplicationFormValues, value: string | boolean) => {
+    setForm(prev => ({ ...prev, [field]: value }));
+    if (fieldErrors[field as string]) {
+      setFieldErrors(prev => { const n = { ...prev }; delete n[field as string]; return n; });
     }
-
-    if (!formData.targetSemester) {
-      newErrors.targetSemester = 'Lütfen bir dönem seçiniz';
-    } else if (formData.targetSemester !== '3' && formData.targetSemester !== '5') {
-      newErrors.targetSemester = 'Sadece 3. veya 5. dönem için başvuru yapılabilir';
-    }
-
-    if (!formData.gpa) {
-      newErrors.gpa = 'GNO (GPA) gereklidir';
-    } else {
-      const gpaNum = parseFloat(formData.gpa);
-      if (isNaN(gpaNum) || gpaNum < 0 || gpaNum > 4.0) {
-        newErrors.gpa = 'GNO 0.00 ile 4.00 arasında olmalıdır';
-      } else if (gpaNum < 2.50) {
-        newErrors.gpa = 'Başvuru için minimum 2.50 GNO gereklidir';
-      }
-    }
-
-    if (!formData.osymScore) {
-      newErrors.osymScore = 'ÖSYM puanı gereklidir';
-    } else {
-      const score = parseFloat(formData.osymScore);
-      if (isNaN(score) || score < 0 || score > 600) {
-        newErrors.osymScore = 'Geçersiz ÖSYM puanı';
-      }
-    }
-
-    if (!formData.osymYear) {
-      newErrors.osymYear = 'ÖSYM sınav yılı gereklidir';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    if (prescreenError) setPrescreenError(null);
   };
+
+  // ─── Identity / YÖKSİS fetch ───────────────────────────────────────────────
+
+  const handleVerifyIdentity = async () => {
+    if (!form.tckn || form.tckn.length !== 11) {
+      setFieldErrors(prev => ({ ...prev, tckn: 'Geçerli bir T.C. Kimlik Numarası giriniz (11 hane)' }));
+      return;
+    }
+    setIdentityStatus('loading');
+    setIdentityWarning(null);
+
+    // Check multiple enrollment first
+    const multiEnroll = MOCK_MULTIPLE_ENROLLMENT[form.tckn];
+    if (multiEnroll) {
+      const result = await mockApiCall(multiEnroll);
+      if (result === null) {
+        setIdentityStatus('manual');
+        setIdentityWarning('Sistem arızası. Elle giriş yapabilirsiniz.');
+      } else {
+        setMultiplePrograms(result.programs);
+        setIdentityStatus('idle'); // Wait for program selection
+      }
+      return;
+    }
+
+    const mockData = MOCK_NVI_YOKSIS[form.tckn] ?? null;
+    const result = await mockApiCall(mockData);
+
+    if (result === null || !result) {
+      setIdentityStatus('manual');
+      setIdentityWarning('Sistem arızası. Elle giriş yapabilirsiniz.');
+    } else {
+      setForm(prev => ({ ...prev, ...result }));
+      setIdentityStatus('verified');
+      toast.success('Kimlik ve akademik bilgiler NVI/YÖKSİS üzerinden doğrulandı');
+    }
+  };
+
+  // ─── ÖSYM fetch ────────────────────────────────────────────────────────────
+
+  const handleOsymYearChange = async (year: string) => {
+    setForm(prev => ({ ...prev, osymYear: year, osymScore: '' }));
+    setOsymStatus('loading');
+    setOsymWarning(null);
+    if (fieldErrors.osymScore) setFieldErrors(prev => { const n = { ...prev }; delete n.osymScore; return n; });
+
+    const yearScores = MOCK_OSYM[form.tckn];
+    const score = yearScores?.[year] ?? null;
+    const result = await mockApiCall(score, 1000);
+
+    if (result === null) {
+      setOsymStatus('manual');
+      setOsymWarning(
+        'ÖSYM servisi yanıt vermedi. Sistem arızası. Elle giriş yapabilirsiniz. Manuel girilen puanlar, ÖİDB incelemesinde belge doğrulamasına tabi tutulacaktır.',
+      );
+    } else {
+      setForm(prev => ({ ...prev, osymScore: result, osymYear: year }));
+      setOsymStatus('fetched');
+    }
+  };
+
+  // ─── Validation helpers ────────────────────────────────────────────────────
+
+  const getGpaError = (): string | null => {
+    if (!form.gpa) return null;
+    const v = parseFloat(form.gpa);
+    if (isNaN(v) || v < 0 || v > 4.0) return 'GNO 0.00 ile 4.00 arasında olmalıdır';
+    if (v < 2.5) return `GNO (${v.toFixed(2)}) minimum 2.50 eşiğinin altındadır`;
+    return null;
+  };
+
+  const gpaErr = getGpaError();
+  const identityDone = identityStatus === 'verified' || identityStatus === 'manual';
+  const fieldReadOnly = identityStatus === 'verified';
+  const gpaReadOnly = identityStatus === 'verified';
+
+  // Submit button disabled only when GPA is below threshold (hard block per Test 2C)
+  const canSubmit =
+    identityDone &&
+    !!form.gpa &&
+    !gpaErr;
+
+  // Draft can be saved as long as TCKN is entered
+  const canSaveDraft = form.tckn.length > 0;
+
+  // ─── Handlers ─────────────────────────────────────────────────────────────
 
   const handleSaveDraft = () => {
-    setIsDraft(true);
-    onSave({ ...formData, status: 'draft' });
-    toast.success('Taslak başarıyla kaydedildi');
+    onSave({ ...form, isDraft: true });
+    toast.success('Taslağınız başarıyla kaydedildi');
   };
 
-  const handleContinue = () => {
-    if (validateForm()) {
-      setIsDraft(false);
-      onSave({ ...formData, status: 'in_progress' });
-      toast.success('Bilgiler kaydedildi, belge yükleme ekranına geçiliyor');
+  const handleSubmit = () => {
+    // Field-level validation (Test 2E: missing fields)
+    const newErrors: Record<string, string> = {};
+    if (!form.transferType) newErrors.transferType = 'Transfer türü seçilmedi';
+    if (!form.targetProgram) newErrors.targetProgram = 'Hedef program seçilmedi';
+    if (!form.targetSemester) newErrors.targetSemester = 'Hedef dönem seçilmedi';
+    if (!form.osymScore) newErrors.osymScore = 'ÖSYM puanı gereklidir';
+
+    if (Object.keys(newErrors).length > 0) {
+      setFieldErrors(newErrors);
+      setPrescreenError('Gerekli Formu doldurun: Lütfen tüm zorunlu alanları doldurunuz.');
+      return;
     }
+
+    // Pre-screening (SDD step 9)
+    const gpa = parseFloat(form.gpa);
+    if (isNaN(gpa) || gpa < 2.5) {
+      setPrescreenError(
+        `Ön eleme başarısız: GNO minimum 2.50 gereklidir (mevcut: ${form.gpa}).`,
+      );
+      return;
+    }
+    if (form.targetSemester !== '3' && form.targetSemester !== '5') {
+      setPrescreenError('Ön eleme başarısız: Sadece 3. veya 5. dönem için başvuru yapılabilir.');
+      return;
+    }
+
+    onSave({ ...form, isDraft: false });
+    toast.success('Bilgiler kaydedildi, belge yükleme ekranına geçiliyor');
   };
 
-  const isFormValid = () => {
-    const gpaNum = parseFloat(formData.gpa);
-    const isValidGpa = !isNaN(gpaNum) && gpaNum >= 2.50 && gpaNum <= 4.0;
-    const isValidSemester = formData.targetSemester === '3' || formData.targetSemester === '5';
-    const hasRequiredFields = formData.targetProgram && formData.osymScore && formData.osymYear;
-    return isValidGpa && isValidSemester && hasRequiredFields && !apiDown;
-  };
-
-  if (apiDown) {
-    return (
-      <div className="space-y-6">
-        <Alert variant="destructive" className="p-8 flex flex-col items-center text-center">
-          <AlertCircle className="h-12 w-12 mb-4" />
-          <h2 className="text-xl font-bold mb-2">Sistem Kullanılamıyor</h2>
-          <AlertDescription className="text-lg">
-            Dış veri sistemleri (YÖKSİS/ÖSYM) şu anda çevrimdışı.
-            Güvenlik nedeniyle manuel girişe izin verilmemektedir.
-            Lütfen daha sonra tekrar deneyiniz.
-          </AlertDescription>
-          <Button variant="outline" onClick={onCancel} className="mt-6">
-             <ArrowLeft className="w-4 h-4 mr-2" />
-             Panele Dön
-          </Button>
-        </Alert>
-      </div>
-    );
-  }
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-gray-900 mb-2">Yeni Transfer Başvurusu Oluştur</h1>
-        <p className="text-gray-600">Başvuru sürecini başlatmak için bilgilerinizi doldurunuz</p>
+        <p className="text-gray-600">Başvuru sürecini başlatmak için T.C. Kimlik Numaranızı doğrulayınız</p>
       </div>
 
-      {/* Form */}
-      <Card className="p-6">
-        <form className="space-y-6">
-          {/* Personal Information (Auto-filled) */}
-          <div className="relative">
-            {isLoading && (
-              <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center rounded-lg">
-                <Loader2 className="h-8 w-8 animate-spin text-[#C00000]" />
+      <Card className="p-6 space-y-6">
+
+        {/* ── TCKN Verification ── */}
+        <div>
+          <h2 className="text-gray-900 mb-4 pb-2 border-b">Kimlik Doğrulama</h2>
+          <div className="flex gap-3 items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="tckn">T.C. Kimlik Numarası</Label>
+              <div className="relative">
+                <Input
+                  id="tckn"
+                  value={form.tckn.replace(/(\d{3})\d{5}(\d{3})/, '$1*****$2')}
+                  readOnly
+                  className="bg-gray-50"
+                />
+                {identityStatus === 'verified' && (
+                  <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />
+                )}
+              </div>
+              <p className="text-xs text-gray-500">Giriş yapan hesabın kimlik numarası kullanılmaktadır</p>
+            </div>
+            {identityStatus !== 'verified' && (
+              <Button
+                type="button"
+                onClick={handleVerifyIdentity}
+                disabled={identityStatus === 'loading'}
+                style={{ backgroundColor: '#C00000' }}
+              >
+                {identityStatus === 'loading' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin mr-2" />Doğrulanıyor…</>
+                ) : (
+                  <><Search className="w-4 h-4 mr-2" />Doğrula ve Veri Getir</>
+                )}
+              </Button>
+            )}
+            {identityStatus === 'verified' && (
+              <div className="flex items-center text-sm text-green-600 font-medium pb-2">
+                <CheckCircle2 className="w-4 h-4 mr-1" /> Doğrulandı
               </div>
             )}
+          </div>
+          {identityWarning && (
+            <Alert className="mt-3 border-yellow-300 bg-yellow-50">
+              <AlertCircle className="h-4 w-4 text-yellow-600" />
+              <AlertDescription className="text-yellow-800">{identityWarning}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        {/* ── Multiple YÖKSİS Enrollment Modal ── */}
+        {multiplePrograms && (
+          <div className="border border-yellow-300 bg-yellow-50 rounded-lg p-4 space-y-3">
+            <div className="flex items-center gap-2 text-yellow-800 font-medium">
+              <AlertCircle className="w-4 h-4" />
+              Birden Fazla Kayıt Bulundu
+            </div>
+            <p className="text-sm text-yellow-700">
+              YÖKSİS'te birden fazla aktif kayıt bulundu. Lütfen başvurmak istediğiniz programı seçiniz:
+            </p>
+            <div className="space-y-2">
+              {multiplePrograms.map(prog => (
+                <button
+                  key={prog.id}
+                  type="button"
+                  onClick={() => {
+                    setForm(prev => ({ ...prev, ...prog.data }));
+                    setIdentityStatus('verified');
+                    setMultiplePrograms(null);
+                    toast.success('Program seçildi, bilgiler yüklendi');
+                  }}
+                  className="w-full text-left px-4 py-3 rounded-md border border-yellow-300 bg-white hover:bg-yellow-50 text-sm font-medium text-gray-800 transition-colors"
+                >
+                  {prog.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Personal Info ── */}
+        {identityDone && (
+          <div>
             <div className="flex items-center justify-between mb-4 border-b pb-2">
               <h2 className="text-gray-900">Kişisel Bilgiler</h2>
-              {!isLoading && <div className="flex items-center text-xs text-green-600 font-medium"><CheckCircle2 className="w-3 h-3 mr-1" /> ÖSYM Tarafından Doğrulandı</div>}
+              {identityStatus === 'verified' && (
+                <div className="flex items-center text-xs text-green-600 font-medium">
+                  <CheckCircle2 className="w-3 h-3 mr-1" /> NVI (MERNİS) Tarafından Doğrulandı
+                </div>
+              )}
+              {identityStatus === 'manual' && (
+                <div className="flex items-center text-xs text-yellow-600 font-medium">
+                  <AlertCircle className="w-3 h-3 mr-1" /> Manuel Giriş
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Ad</Label>
-                <div className="relative">
-                  <Input id="name" value={formData.name} readOnly className="bg-gray-50" />
-                  {!isLoading && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+              {(['name', 'surname', 'birthDate'] as const).map(field => (
+                <div key={field} className="space-y-2">
+                  <Label>{field === 'name' ? 'Ad' : field === 'surname' ? 'Soyad' : 'Doğum Tarihi'}</Label>
+                  <div className="relative">
+                    <Input
+                      value={form[field]}
+                      onChange={e => updateField(field, e.target.value)}
+                      readOnly={fieldReadOnly}
+                      placeholder={field === 'birthDate' ? 'GG/AA/YYYY' : ''}
+                      className={fieldReadOnly ? 'bg-gray-50' : ''}
+                    />
+                    {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="surname">Soyad</Label>
-                <div className="relative">
-                  <Input id="surname" value={formData.surname} readOnly className="bg-gray-50" />
-                  {!isLoading && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="tckn">T.C. Kimlik Numarası</Label>
-                <div className="relative">
-                  <Input id="tckn" value={formData.tckn.replace(/(\d{3})\d{5}(\d{3})/, '$1*****$2')} readOnly className="bg-gray-50" />
-                  {!isLoading && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="studentId">Öğrenci Numarası</Label>
-                <div className="relative">
-                  <Input id="studentId" value={formData.studentId} readOnly className="bg-gray-50" />
-                  {!isLoading && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
-                </div>
-              </div>
+              ))}
             </div>
           </div>
+        )}
 
-          {/* Current Academic Information */}
-          <div className="relative">
-            {isLoading && (
-              <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center rounded-lg">
-                <Loader2 className="h-8 w-8 animate-spin text-[#C00000]" />
-              </div>
-            )}
+        {/* ── Academic Info (YÖKSİS) ── */}
+        {identityDone && (
+          <div>
             <div className="flex items-center justify-between mb-4 border-b pb-2">
               <h2 className="text-gray-900">Mevcut Akademik Bilgiler</h2>
-              {!isLoading && <div className="flex items-center text-xs text-green-600 font-medium"><CheckCircle2 className="w-3 h-3 mr-1" /> YÖKSİS Tarafından Doğrulandı</div>}
+              {identityStatus === 'verified' && (
+                <div className="flex items-center text-xs text-green-600 font-medium">
+                  <CheckCircle2 className="w-3 h-3 mr-1" /> YÖKSİS Tarafından Doğrulandı
+                </div>
+              )}
+              {identityStatus === 'manual' && (
+                <div className="flex items-center text-xs text-yellow-600 font-medium">
+                  <AlertCircle className="w-3 h-3 mr-1" /> Manuel Giriş
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Institution */}
               <div className="space-y-2">
-                <Label htmlFor="currentUniversity">Mevcut Üniversite</Label>
+                <Label>Mevcut Üniversite</Label>
                 <div className="relative">
-                  <Input id="currentUniversity" value={formData.currentUniversity} readOnly className="bg-gray-50" />
-                  {!isLoading && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                  <Input value={form.institution} onChange={e => updateField('institution', e.target.value)} readOnly={fieldReadOnly} className={fieldReadOnly ? 'bg-gray-50' : ''} />
+                  {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
                 </div>
               </div>
+              {/* Department */}
               <div className="space-y-2">
-                <Label htmlFor="currentProgram">Mevcut Program</Label>
+                <Label>Mevcut Bölüm</Label>
                 <div className="relative">
-                  <Input id="currentProgram" value={formData.currentProgram} readOnly className="bg-gray-50" />
-                  {!isLoading && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                  <Input value={form.department} onChange={e => updateField('department', e.target.value)} readOnly={fieldReadOnly} className={fieldReadOnly ? 'bg-gray-50' : ''} />
+                  {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                </div>
+              </div>
+              {/* GPA — read-only from YÖKSİS; editable only in manual mode */}
+              <div className="space-y-2">
+                <Label>GNO (GPA — 4.00 üzerinden)</Label>
+                <div className="relative">
+                  <Input
+                    value={form.gpa}
+                    onChange={e => updateField('gpa', e.target.value)}
+                    readOnly={gpaReadOnly}
+                    placeholder="0.00"
+                    className={gpaReadOnly ? 'bg-gray-50' : ''}
+                  />
+                  {gpaReadOnly && !gpaErr && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                  {gpaReadOnly && gpaErr && <AlertCircle className="absolute right-3 top-2.5 h-4 w-4 text-red-500" />}
+                </div>
+                {gpaErr && (
+                  <p className="text-xs text-red-600 font-medium">{gpaErr}</p>
+                )}
+                {form.gpa && !gpaErr && (
+                  <p className="text-xs text-green-600">✓ GNO minimum gereksinimi karşılıyor</p>
+                )}
+              </div>
+              {/* Finished Semester */}
+              <div className="space-y-2">
+                <Label>Tamamlanan Dönem</Label>
+                <div className="relative">
+                  <Input value={form.finishedSemester} onChange={e => updateField('finishedSemester', e.target.value)} readOnly={fieldReadOnly} className={fieldReadOnly ? 'bg-gray-50' : ''} />
+                  {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                </div>
+              </div>
+              {/* Finished Year */}
+              <div className="space-y-2">
+                <Label>Tamamlanan Yıl</Label>
+                <div className="relative">
+                  <Input value={form.finishedYear} onChange={e => updateField('finishedYear', e.target.value)} readOnly={fieldReadOnly} className={fieldReadOnly ? 'bg-gray-50' : ''} />
+                  {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                </div>
+              </div>
+              {/* Current Credit */}
+              <div className="space-y-2">
+                <Label>Güncel Kredi</Label>
+                <div className="relative">
+                  <Input value={form.currentCredit} onChange={e => updateField('currentCredit', e.target.value)} readOnly={fieldReadOnly} className={fieldReadOnly ? 'bg-gray-50' : ''} />
+                  {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                </div>
+              </div>
+              {/* Language */}
+              <div className="space-y-2">
+                <Label>Eğitim Dili</Label>
+                <div className="relative">
+                  <Input
+                    value={form.languagePercentage ? `%${form.languagePercentage} ${form.languageLabel}` : ''}
+                    readOnly
+                    className="bg-gray-50"
+                    onChange={() => {}}
+                  />
+                  {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
                 </div>
               </div>
             </div>
           </div>
+        )}
 
-          {/* Transfer Application Details */}
+        {/* ── Transfer Details ── */}
+        {identityDone && (
           <div>
             <h2 className="text-gray-900 mb-4 pb-2 border-b">Transfer Başvuru Detayları</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Transfer Type */}
               <div className="space-y-2">
-                <Label htmlFor="targetProgram">Hedef Program *</Label>
-                <Select 
-                  value={formData.targetProgram} 
-                  onValueChange={(value) => setFormData({ ...formData, targetProgram: value })}
-                >
-                  <SelectTrigger id="targetProgram">
+                <Label>Transfer Türü *</Label>
+                <Select value={form.transferType} onValueChange={v => updateField('transferType', v)}>
+                  <SelectTrigger className={fieldErrors.transferType ? 'border-red-500' : ''}>
+                    <SelectValue placeholder="Transfer türü seçiniz" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="KURUMLAR_ARASI">Kurumlar Arası Yatay Geçiş</SelectItem>
+                    <SelectItem value="KURUM_ICI">Kurum İçi Yatay Geçiş</SelectItem>
+                    <SelectItem value="DGS">Dikey Geçiş (DGS)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {fieldErrors.transferType && <p className="text-xs text-red-600">{fieldErrors.transferType}</p>}
+              </div>
+              {/* Target Program */}
+              <div className="space-y-2">
+                <Label>Hedef Program *</Label>
+                <Select value={form.targetProgram} onValueChange={v => updateField('targetProgram', v)}>
+                  <SelectTrigger className={fieldErrors.targetProgram ? 'border-red-500' : ''}>
                     <SelectValue placeholder="Program seçiniz" />
                   </SelectTrigger>
                   <SelectContent>
@@ -255,18 +514,13 @@ export function ApplicationForm({ onSave, onCancel }: ApplicationFormProps) {
                     <SelectItem value="architecture">Mimarlık</SelectItem>
                   </SelectContent>
                 </Select>
-                {errors.targetProgram && (
-                  <p className="text-xs text-red-600">{errors.targetProgram}</p>
-                )}
+                {fieldErrors.targetProgram && <p className="text-xs text-red-600">{fieldErrors.targetProgram}</p>}
               </div>
-
+              {/* Target Semester */}
               <div className="space-y-2">
-                <Label htmlFor="targetSemester">Hedef Dönem *</Label>
-                <Select 
-                  value={formData.targetSemester} 
-                  onValueChange={(value) => setFormData({ ...formData, targetSemester: value })}
-                >
-                  <SelectTrigger id="targetSemester">
+                <Label>Hedef Dönem *</Label>
+                <Select value={form.targetSemester} onValueChange={v => updateField('targetSemester', v)}>
+                  <SelectTrigger className={fieldErrors.targetSemester ? 'border-red-500' : ''}>
                     <SelectValue placeholder="Dönem seçiniz" />
                   </SelectTrigger>
                   <SelectContent>
@@ -274,53 +528,32 @@ export function ApplicationForm({ onSave, onCancel }: ApplicationFormProps) {
                     <SelectItem value="5">5. Dönem (3. Sınıf)</SelectItem>
                   </SelectContent>
                 </Select>
-                {errors.targetSemester && (
-                  <p className="text-xs text-red-600">{errors.targetSemester}</p>
-                )}
+                {fieldErrors.targetSemester && <p className="text-xs text-red-600">{fieldErrors.targetSemester}</p>}
               </div>
+            </div>
+          </div>
+        )}
 
+        {/* ── ÖSYM ── */}
+        {identityDone && (
+          <div>
+            <h2 className="text-gray-900 mb-4 pb-2 border-b">ÖSYM Sınav Bilgileri</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="gpa">Mevcut GNO (GPA - 4.00 üzerinden) *</Label>
-                <Input 
-                  id="gpa" 
-                  type="number" 
-                  step="0.01" 
-                  min="0" 
-                  max="4"
-                  placeholder="örneğin, 3.25"
-                  value={formData.gpa}
-                  onChange={(e) => setFormData({ ...formData, gpa: e.target.value })}
-                />
-                {errors.gpa && (
-                  <p className="text-xs text-red-600">{errors.gpa}</p>
-                )}
-                {formData.gpa && parseFloat(formData.gpa) >= 2.50 && parseFloat(formData.gpa) <= 4.0 && (
-                  <p className="text-xs text-green-600">✓ GNO minimum gereksinimi karşılıyor</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="osymScore">ÖSYM Puanı *</Label>
-                <Input 
-                  id="osymScore" 
-                  type="number" 
-                  placeholder="örneğin, 485.5"
-                  value={formData.osymScore}
-                  onChange={(e) => setFormData({ ...formData, osymScore: e.target.value })}
-                />
-                {errors.osymScore && (
-                  <p className="text-xs text-red-600">{errors.osymScore}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="osymYear">ÖSYM Sınav Yılı *</Label>
-                <Select 
-                  value={formData.osymYear} 
-                  onValueChange={(value) => setFormData({ ...formData, osymYear: value })}
+                <Label>Sınav Yılı *</Label>
+                <Select
+                  value={form.osymYear}
+                  onValueChange={handleOsymYearChange}
+                  disabled={osymStatus === 'loading'}
                 >
-                  <SelectTrigger id="osymYear">
-                    <SelectValue placeholder="Yıl seçiniz" />
+                  <SelectTrigger>
+                    {osymStatus === 'loading' ? (
+                      <div className="flex items-center text-gray-500">
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />Puan alınıyor…
+                      </div>
+                    ) : (
+                      <SelectValue placeholder="Yıl seçiniz" />
+                    )}
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="2024">2024</SelectItem>
@@ -328,52 +561,78 @@ export function ApplicationForm({ onSave, onCancel }: ApplicationFormProps) {
                     <SelectItem value="2022">2022</SelectItem>
                   </SelectContent>
                 </Select>
-                {errors.osymYear && (
-                  <p className="text-xs text-red-600">{errors.osymYear}</p>
-                )}
+              </div>
+              <div className="space-y-2">
+                <Label>ÖSYM Yerleştirme Puanı *</Label>
+                <div className="relative">
+                  <Input
+                    value={form.osymScore}
+                    onChange={e => { if (osymStatus === 'manual') updateField('osymScore', e.target.value); }}
+                    readOnly={osymStatus === 'fetched'}
+                    placeholder={osymStatus === 'manual' ? 'Puanınızı giriniz' : 'Yıl seçilince otomatik yüklenecek'}
+                    className={osymStatus === 'fetched' ? 'bg-gray-50' : ''}
+                  />
+                  {osymStatus === 'fetched' && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                </div>
+                {fieldErrors.osymScore && <p className="text-xs text-red-600">{fieldErrors.osymScore}</p>}
               </div>
             </div>
+            {osymWarning && (
+              <Alert className="mt-3 border-yellow-300 bg-yellow-50">
+                <AlertCircle className="h-4 w-4 text-yellow-600" />
+                <AlertDescription className="text-yellow-800">{osymWarning}</AlertDescription>
+              </Alert>
+            )}
           </div>
+        )}
 
-          {/* Important Notice */}
+        {/* ── Pre-screening / validation error ── */}
+        {prescreenError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{prescreenError}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* ── Notice ── */}
+        {identityDone && (
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              <strong>Önemli:</strong> Tüm bilgilerin doğru olduğundan emin olunuz. Bir sonraki adımda destekleyici belgeleri yüklemeniz gerekecektir.
-              Transfer başvuruları için minimum 2.50 GNO gereklidir.
+              <strong>Önemli:</strong> Transfer başvuruları için minimum 2.50 GNO gereklidir.
+              Bir sonraki adımda destekleyici belgeleri yüklemeniz gerekecektir.
             </AlertDescription>
           </Alert>
+        )}
 
-          {/* Action Buttons */}
-          <div className="flex justify-between pt-4">
-            <Button type="button" variant="outline" onClick={onCancel}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              İptal
+        {/* ── Actions ── */}
+        <div className="flex justify-between pt-4">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            İptal
+          </Button>
+          <div className="space-x-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSaveDraft}
+              disabled={!canSaveDraft}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              Taslak Olarak Kaydet
             </Button>
-            <div className="space-x-3">
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={handleSaveDraft}
-                disabled={isLoading || !isFormValid()}
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Taslağı Kaydet
-              </Button>
-              <Button 
-                type="button" 
-                onClick={handleContinue}
-                disabled={isLoading || !isFormValid()}
-                style={{ backgroundColor: '#C00000' }}
-                className={!isFormValid() ? 'opacity-50' : ''}
-              >
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Kaydet ve Devam Et
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
-            </div>
+            <Button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              style={{ backgroundColor: '#C00000' }}
+              className={!canSubmit ? 'opacity-50' : ''}
+            >
+              Kaydet ve Belge Yüklemeye Devam Et
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
           </div>
-        </form>
+        </div>
       </Card>
     </div>
   );

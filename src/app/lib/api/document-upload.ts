@@ -66,11 +66,15 @@ export async function createApplication(
     studentTckn: string;
     studentFullName: string;
     targetDepartmentId: string;
+    targetFacultyId?: string;
+    transferType?: string;
     targetSemester: number;
     submittedGpa: number;
     submittedYksScore?: number;
+    yksExamYear?: number;
     currentInstitution?: string;
     currentDepartment?: string;
+    isDraft?: boolean;
   },
 ): Promise<{ applicationId: string }> {
   const res = await fetch(`${BASE}/applications`, {
@@ -110,4 +114,33 @@ export async function submitApplication(applicationId: string, userId: string): 
     headers: authHeaders(userId),
   });
   await handleResponse(res);
+}
+
+export interface ActivePeriodDto {
+  periodId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+}
+
+export async function getActivePeriod(): Promise<ActivePeriodDto | null> {
+  try {
+    const res = await fetch(`${BASE}/period/active`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function cancelApplication(applicationId: string, userId: string): Promise<void> {
+  const res = await fetch(`${BASE}/applications/${applicationId}`, {
+    method: 'DELETE',
+    headers: authHeaders(userId),
+  });
+  if (!res.ok && res.status !== 204) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message ?? `HTTP ${res.status}`);
+  }
 }

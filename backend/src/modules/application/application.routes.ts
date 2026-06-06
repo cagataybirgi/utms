@@ -35,10 +35,14 @@ export function buildApplicationRouter(): Router {
         yksExamYear,
         currentInstitution,
         currentDepartment,
+        isDraft,
       } = req.body;
 
-      if (!studentTckn || !targetDepartmentId || !targetSemester || !submittedGpa) {
-        throw new ValidationError("studentTckn, targetDepartmentId, targetSemester, and submittedGpa are required.");
+      if (!studentTckn) {
+        throw new ValidationError("studentTckn is required.");
+      }
+      if (!isDraft && (!targetDepartmentId || !targetSemester || !submittedGpa)) {
+        throw new ValidationError("targetDepartmentId, targetSemester, and submittedGpa are required for submission.");
       }
 
       const result = await service.create(req.authUser.userId, {
@@ -54,9 +58,20 @@ export function buildApplicationRouter(): Router {
         yksExamYear: yksExamYear ? Number(yksExamYear) : undefined,
         currentInstitution,
         currentDepartment,
+        isDraft: isDraft === true,
       });
 
       res.status(201).json(result);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  r.delete("/:applicationId", requireRoles(UserRole.Student, UserRole.SystemAdmin), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.authUser) throw new UnauthorizedError();
+      await service.cancel(req.authUser.userId, req.params.applicationId);
+      res.status(204).send();
     } catch (e) {
       next(e);
     }
