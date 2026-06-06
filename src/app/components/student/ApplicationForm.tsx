@@ -286,7 +286,11 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                 {identityStatus === 'verified' && (
                   <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />
                 )}
+                {fieldErrors.tckn && (
+                  <AlertCircle className="absolute right-3 top-2.5 h-4 w-4 text-red-500" />
+                )}
               </div>
+              {fieldErrors.tckn && <p className="text-xs text-red-600 font-medium">{fieldErrors.tckn}</p>}
               <p className="text-xs text-gray-500">Giriş yapan hesabın kimlik numarası kullanılmaktadır</p>
             </div>
             {identityStatus !== 'verified' && (
@@ -388,9 +392,14 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
           <div>
             <div className="flex items-center justify-between mb-4 border-b pb-2">
               <h2 className="text-gray-900">Mevcut Akademik Bilgiler</h2>
-              {identityStatus === 'verified' && (
+              {identityStatus === 'verified' && !gpaErr && (
                 <div className="flex items-center text-xs text-green-600 font-medium">
                   <CheckCircle2 className="w-3 h-3 mr-1" /> YÖKSİS Tarafından Doğrulandı
+                </div>
+              )}
+              {identityStatus === 'verified' && gpaErr && (
+                <div className="flex items-center text-xs text-red-600 font-medium">
+                  <AlertCircle className="w-3 h-3 mr-1" /> Uygunluk Kontrolü Başarısız — GNO Yetersiz
                 </div>
               )}
               {identityStatus === 'manual' && (
@@ -475,6 +484,14 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                 </div>
               </div>
             </div>
+            {gpaErr && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  {gpaErr}. Bu başvuru ön elemeyi geçemez ve gönderilemez.
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         )}
 
@@ -573,6 +590,7 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                     className={osymStatus === 'fetched' ? 'bg-gray-50' : ''}
                   />
                   {osymStatus === 'fetched' && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                  {fieldErrors.osymScore && <AlertCircle className="absolute right-3 top-2.5 h-4 w-4 text-red-500" />}
                 </div>
                 {fieldErrors.osymScore && <p className="text-xs text-red-600">{fieldErrors.osymScore}</p>}
               </div>
