@@ -13,6 +13,7 @@ import {
 import { seedAll } from "../mocks/seed-data";
 import { EDevletMockClient } from "./external/edevlet-client";
 import { OcrParserMockClient } from "./external/ocr-parser-client";
+import { InMemoryBoardReviewStateRepository } from "../modules/board/in-memory-board-state";
 
 export interface AppContainer {
   users: InMemoryUserRepository;
@@ -27,6 +28,7 @@ export interface AppContainer {
   auth: InMemoryAuthTokenRepository;
   edevlet: EDevletMockClient;
   ocr: OcrParserMockClient;
+  boardStates: InMemoryBoardReviewStateRepository;
 }
 
 export function createContainer(): AppContainer {
@@ -43,6 +45,7 @@ export function createContainer(): AppContainer {
     auth: new InMemoryAuthTokenRepository(),
     edevlet: new EDevletMockClient(),
     ocr: new OcrParserMockClient(),
+    boardStates: new InMemoryBoardReviewStateRepository(),
   };
   seedAll(container);
   return container;
@@ -67,5 +70,6 @@ export function resetContainer(container: AppContainer): void {
   container.notifications.clear();
   container.auth.clear();
   container.auth.setEmailServiceAvailable(true);
+  container.boardStates.clear();
   seedAll(container);
 }

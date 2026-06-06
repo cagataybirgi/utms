@@ -1,0 +1,746 @@
+import { randomUUID } from "node:crypto";
+import {
+  ApplicationStatus,
+  EvaluationPackage,
+  PackageStatus,
+  UserRole,
+} from "../../shared/types";
+import {
+  IAsyncApplicationRepository,
+  IIntibakRepository,
+  IPackageRepository,
+} from "../../shared/repositories";
+import { AuditLogger, NotificationService } from "../../shared/audit";
+import {
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from "../../shared/errors";
+import { computePackageHash } from "./hash";
+import {
+  BoardDecisionInput,
+  BoardDecisionResult,
+  BoardNotificationStub,
+  BoardReviewState,
+  DeanSignature,
+  HashCheckResult,
+  IBoardReviewStateRepository,
+  IntibakCompletenessResult,
+  LoopbackTarget,
+  PublishInput,
+  PublishResult,
+  SignatureIssueResult,
+  SignatureVerifyInput,
+  SignatureVerifyResult,
+  StatePropagationEvent,
+} from "./board.types";
+
+export interface BoardServiceDeps {
+  applications: IAsyncApplicationRepository;
+  intibakTables: IIntibakRepository;
+  packages: IPackageRepository;
+  boardStates: IBoardReviewStateRepository;
+  audit: AuditLogger;
+  notifications: NotificationService;
+}
+
+const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * BoardService — owns the high-stakes transitions between Dean → Faculty
+ * Board → Publication.  Five safety protocols live in this single service so
+ * that the gate, integrity, signature, approval and notification flows share
+ * one consistent state machine.
+ *
+ *   TC-7B   → checkIntibakCompleteness (called by IntibakService.sendPackage too)
+ *   702-HASH→ checkHashIntegrity / clearHashLock
+ *   TC-7C   → issueDeanSignatureToken / verifyDeanSignature
+ *   TC-7A   → boardDecide (approval path)
+ *   TC-7E   → boardDecide (rejection path)
+ *   571-NTF → publish
+ */
+export class BoardService {
+  /** Issued-but-unconsumed signature tokens.  In production: persist to DB. */
+  private readonly tokenRegistry = new Map<
+    string,
+    { signatoryId: string; issuedAt: Date }
+  >();
+
+  constructor(private readonly deps: BoardServiceDeps) {}
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   List / detail
+  // ─────────────────────────────────────────────────────────────────────────
+
+  listBoardQueue(): Array<{ pkg: EvaluationPackage; state: BoardReviewState }> {
+    return this.deps.boardStates
+      .findAll()
+      .map((state) => {
+        const pkg = this.deps.packages.findById(state.packageId);
+        return pkg ? { pkg, state } : null;
+      })
+      .filter((x): x is { pkg: EvaluationPackage; state: BoardReviewState } => x !== null);
+  }
+
+  getBoardPackage(packageId: string): {
+    pkg: EvaluationPackage;
+    state: BoardReviewState;
+    hashCheck: HashCheckResult;
+  } {
+    const pkg = this.requirePackage(packageId);
+    const state = this.requireBoardState(packageId);
+    const hashCheck = this.checkHashIntegrity(packageId);
+    return { pkg, state, hashCheck };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   TC-7B  —  Intibak Completeness Gate
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Pure read — never mutates.  Confirms every asil application has a
+   * finalized (saved + locked) intibak table.  Called by IntibakService just
+   * before sending the package to the Dean, and re-checked on the Board side
+   * before approval.
+   */
+  async checkIntibakCompleteness(packageId: string): Promise<IntibakCompletenessResult> {
+    const pkg = this.deps.packages.findById(packageId);
+    if (!pkg) {
+      return {
+        packageId,
+        totalAsil: 0,
+        missingApplicationIds: [],
+        isComplete: false,
+        blockedBy: "INTIBAK_GATE",
+      };
+    }
+
+    const missing: string[] = [];
+    for (const applicationId of pkg.asilApplicationIds) {
+      const app = await this.deps.applications.findById(applicationId);
+      if (!app || !app.intibakTableId) {
+        missing.push(applicationId);
+        continue;
+      }
+      const table = this.deps.intibakTables.findById(app.intibakTableId);
+      if (!table || !table.isLocked || !table.savedAt) {
+        missing.push(applicationId);
+      }
+    }
+
+    return {
+      packageId,
+      totalAsil: pkg.asilApplicationIds.length,
+      missingApplicationIds: missing,
+      isComplete: missing.length === 0,
+      blockedBy: missing.length > 0 ? "INTIBAK_GATE" : null,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   702-HASH  —  Post-signature integrity check
+  // ─────────────────────────────────────────────────────────────────────────
+
+  checkHashIntegrity(packageId: string): HashCheckResult {
+    const pkg = this.requirePackage(packageId);
+    const state = this.requireBoardState(packageId);
+
+    // No dean signature yet → no integrity baseline to check against.
+    if (!state.deanSignature) {
+      return {
+        packageId,
+        hashAtSignature: "",
+        currentHash: computePackageHash(this.canonicalInput(pkg)),
+        isMatch: true,
+        errorCode: null,
+        locked: false,
+      };
+    }
+
+    const currentHash = computePackageHash(this.canonicalInput(pkg));
+    const signedHash = state.deanSignature.documentHashAtSignature;
+    const isMatch = currentHash === signedHash;
+
+    if (!isMatch && !state.hashLocked) {
+      // First detection — lock the board state and write an audit entry.
+      state.hashLocked = true;
+      state.hashLockedAt = new Date().toISOString();
+      state.hashLockReason = `702-HASH mismatch. Signed: ${signedHash}. Current: ${currentHash}.`;
+      state.lifecycle = "LOCKED_HASH_VIOLATION";
+      this.deps.boardStates.save(state);
+      this.deps.audit.write({
+        actorUserId: "SYSTEM",
+        actorRole: UserRole.SystemAdmin,
+        actionType: "HASH_INTEGRITY_VIOLATION",
+        affectedEntityId: packageId,
+        affectedEntityType: "BoardReviewState",
+        previousValue: { hashLocked: false },
+        newValue: { hashLocked: true, signedHash, currentHash },
+      });
+    }
+
+    return {
+      packageId,
+      hashAtSignature: signedHash,
+      currentHash,
+      isMatch,
+      errorCode: isMatch ? null : "702-HASH",
+      locked: !isMatch,
+    };
+  }
+
+  /**
+   * Clears the 702-HASH lock by accepting a fresh dean signature on the
+   * current document state.  Use this after a sysadmin corrects the tampered
+   * data and the Dean re-signs.
+   */
+  clearHashLock(packageId: string, newToken: string, signatoryId: string): void {
+    const pkg = this.requirePackage(packageId);
+    const state = this.requireBoardState(packageId);
+
+    if (!state.hashLocked) {
+      throw new ConflictError(
+        "NOT_LOCKED",
+        "Package is not in a 702-HASH locked state.",
+      );
+    }
+
+    const currentHash = computePackageHash(this.canonicalInput(pkg));
+    state.deanSignature = this.buildSignature(newToken, signatoryId, currentHash);
+    state.hashLocked = false;
+    state.hashLockedAt = null;
+    state.hashLockReason = null;
+    state.lifecycle = "PENDING_BOARD_REVIEW";
+    this.deps.boardStates.save(state);
+
+    this.deps.audit.write({
+      actorUserId: signatoryId,
+      actorRole: UserRole.DeansOfficeStaff,
+      actionType: "HASH_LOCK_CLEARED",
+      affectedEntityId: packageId,
+      affectedEntityType: "BoardReviewState",
+      previousValue: { hashLocked: true },
+      newValue: { hashLocked: false, newHash: currentHash },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   TC-7C  —  Digital Signature Flow
+  // ─────────────────────────────────────────────────────────────────────────
+
+  issueDeanSignatureToken(signatoryId: string): SignatureIssueResult {
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10).replace(/-/g, "");
+    const initials = signatoryId
+      .replace(/[^A-Za-z]/g, "")
+      .toUpperCase()
+      .slice(0, 3)
+      .padEnd(3, "X");
+    const seq = randomUUID().slice(0, 4).toUpperCase();
+    const token = `SIG-${initials}-${datePart}-${seq}`;
+    this.tokenRegistry.set(token, { signatoryId, issuedAt: now });
+
+    return {
+      token,
+      validForHours: 24,
+      signatoryId,
+      issuedAt: now.toISOString(),
+    };
+  }
+
+  verifyDeanSignature(input: SignatureVerifyInput): SignatureVerifyResult {
+    const pkg = this.deps.packages.findById(input.packageId);
+    if (!pkg) {
+      return this.signatureFailure(
+        input.packageId,
+        input.token,
+        "7C-INVALID",
+        "Package not found.",
+      );
+    }
+
+    const entry = this.tokenRegistry.get(input.token);
+    if (!entry) {
+      return this.signatureFailure(
+        input.packageId,
+        input.token,
+        "7C-INVALID",
+        "Token not recognised.",
+      );
+    }
+    if (entry.signatoryId !== input.signatoryId) {
+      return this.signatureFailure(
+        input.packageId,
+        input.token,
+        "7C-INVALID",
+        `Token issued to ${entry.signatoryId} — submitted by ${input.signatoryId}.`,
+      );
+    }
+    const ageMs = Date.now() - entry.issuedAt.getTime();
+    if (ageMs > TOKEN_TTL_MS) {
+      return this.signatureFailure(
+        input.packageId,
+        input.token,
+        "7C-EXPIRED",
+        `Token expired ${Math.floor(ageMs / 3600000)}h ago — re-issue required.`,
+      );
+    }
+
+    // ── Valid: write the signature and the document hash snapshot ──────────
+    const state = this.requireBoardState(input.packageId);
+    if (state.hashLocked) {
+      throw new ConflictError(
+        "HASH_LOCKED",
+        "Cannot apply signature on a 702-HASH-locked package.",
+      );
+    }
+
+    const documentHash = computePackageHash(this.canonicalInput(pkg));
+    state.deanSignature = this.buildSignature(
+      input.token,
+      input.signatoryId,
+      documentHash,
+    );
+    state.lifecycle = "FORWARDED_TO_BOARD";
+    this.deps.boardStates.save(state);
+
+    this.tokenRegistry.delete(input.token); // single-use
+
+    this.deps.audit.write({
+      actorUserId: input.signatoryId,
+      actorRole: UserRole.DeansOfficeStaff,
+      actionType: "DEAN_SIGNATURE_VERIFIED",
+      affectedEntityId: input.packageId,
+      affectedEntityType: "BoardReviewState",
+      previousValue: { lifecycle: "PENDING_BOARD_REVIEW" },
+      newValue: { lifecycle: "FORWARDED_TO_BOARD", documentHash },
+    });
+
+    return {
+      packageId: input.packageId,
+      token: input.token,
+      state: "valid",
+      errorCode: null,
+      message: "Signature verified. Package cleared for Faculty Board review.",
+      clearedAt: new Date().toISOString(),
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   TC-7A & TC-7E  —  Board Decision
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async boardDecide(input: BoardDecisionInput): Promise<BoardDecisionResult> {
+    const pkg = this.requirePackage(input.packageId);
+    const state = this.requireBoardState(input.packageId);
+
+    // ── Guard: hash integrity must hold ───────────────────────────────────
+    const hashCheck = this.checkHashIntegrity(input.packageId);
+    if (!hashCheck.isMatch) {
+      throw new ConflictError(
+        "702-HASH",
+        "Decision blocked by 702-HASH integrity violation. Restore data and re-sign.",
+      );
+    }
+
+    // ── Guard: valid signature must be present ─────────────────────────────
+    if (!state.deanSignature || state.deanSignature.state !== "valid") {
+      throw new ConflictError(
+        "SIGNATURE_REQUIRED",
+        "Dean's signature missing or invalid (Error 7C). Cannot decide.",
+      );
+    }
+
+    // ── Guard: only from FORWARDED_TO_BOARD or PENDING_BOARD_REVIEW ────────
+    if (
+      state.lifecycle !== "FORWARDED_TO_BOARD" &&
+      state.lifecycle !== "PENDING_BOARD_REVIEW"
+    ) {
+      throw new ConflictError(
+        "INVALID_LIFECYCLE",
+        `Cannot decide a package in lifecycle '${state.lifecycle}'.`,
+      );
+    }
+
+    return input.approved
+      ? this.approvePath(pkg, state, input)
+      : this.rejectPath(pkg, state, input);
+  }
+
+  // TC-7A — approval path
+  private async approvePath(
+    pkg: EvaluationPackage,
+    state: BoardReviewState,
+    input: BoardDecisionInput,
+  ): Promise<BoardDecisionResult> {
+    const now = new Date().toISOString();
+
+    // Record the board decision.
+    state.boardDecision = {
+      decidedBy: input.decidedBy,
+      decidedAt: now,
+      approved: true,
+      resolutionText: input.resolutionText,
+      rejectionReason: null,
+      loopbackTarget: null,
+    };
+    state.lifecycle = "APPROVED_BY_BOARD";
+    this.deps.boardStates.save(state);
+
+    // Propagate to EvaluationPackage status.
+    pkg.status = PackageStatus.ApprovedFacultyBoard;
+    this.deps.packages.save(pkg);
+
+    // Propagate to each underlying application.
+    const propagation: StatePropagationEvent[] = [
+      {
+        target: "BoardDashboard",
+        previousValue: "PENDING_BOARD_REVIEW",
+        newValue: "APPROVED_BY_BOARD",
+        propagatedAt: now,
+      },
+    ];
+
+    for (const appId of [...pkg.asilApplicationIds, ...pkg.yedekApplicationIds]) {
+      const app = await this.deps.applications.findById(appId);
+      if (!app) continue;
+      const previous = app.currentStatus;
+      app.currentStatus = ApplicationStatus.ApprovedFacultyBoard;
+      app.lastModifiedAt = now;
+      await this.deps.applications.save(app);
+      propagation.push({
+        target: `FinalResult:${appId}`,
+        previousValue: previous,
+        newValue: app.currentStatus,
+        propagatedAt: now,
+      });
+    }
+
+    this.deps.audit.write({
+      actorUserId: input.decidedBy,
+      actorRole: UserRole.FacultyBoardMember,
+      actionType: "BOARD_APPROVE",
+      affectedEntityId: pkg.packageId,
+      affectedEntityType: "EvaluationPackage",
+      previousValue: { lifecycle: "FORWARDED_TO_BOARD" },
+      newValue: { lifecycle: "APPROVED_BY_BOARD", resolution: input.resolutionText },
+    });
+
+    return {
+      packageId: pkg.packageId,
+      approved: true,
+      newLifecycle: "APPROVED_BY_BOARD",
+      statePropagation: propagation,
+      notifications: [],
+      rejectionDispatch: null,
+    };
+  }
+
+  // TC-7E — rejection path
+  private async rejectPath(
+    pkg: EvaluationPackage,
+    state: BoardReviewState,
+    input: BoardDecisionInput,
+  ): Promise<BoardDecisionResult> {
+    if (!input.rejectionReason?.trim()) {
+      throw new ValidationError(
+        "rejectionReason is required when approved is false.",
+      );
+    }
+
+    const target: LoopbackTarget = input.loopbackTarget ?? "ygk";
+    const now = new Date().toISOString();
+
+    // Record the rejection.
+    state.boardDecision = {
+      decidedBy: input.decidedBy,
+      decidedAt: now,
+      approved: false,
+      resolutionText: input.resolutionText,
+      rejectionReason: input.rejectionReason,
+      loopbackTarget: target,
+    };
+    state.lifecycle = "REJECTED_BY_BOARD";
+    this.deps.boardStates.save(state);
+
+    // Return the package to the YGK side.
+    pkg.status = PackageStatus.Returned;
+    this.deps.packages.save(pkg);
+
+    // Loop applications back to the appropriate review status.
+    const appBackStatus = loopbackToApplicationStatus(target);
+    for (const appId of [
+      ...pkg.asilApplicationIds,
+      ...pkg.yedekApplicationIds,
+      ...pkg.redApplicationIds,
+    ]) {
+      const app = await this.deps.applications.findById(appId);
+      if (!app) continue;
+      app.currentStatus = appBackStatus;
+      app.lastModifiedAt = now;
+      await this.deps.applications.save(app);
+    }
+
+    // Dean notification — decoupled (same pattern as 571-NOTIFY).
+    const deanNotif = this.dispatchDecoupled(state, {
+      recipientUserId: "DEAN_OFFICE",
+      eventType: "BOARD_REJECTION",
+      channel: "EMAIL",
+      subject: `Board Rejection — ${pkg.packageId} returned to ${target.toUpperCase()}`,
+      body: input.rejectionReason,
+    });
+
+    const propagation: StatePropagationEvent[] = [
+      {
+        target: "BoardDashboard",
+        previousValue: "FORWARDED_TO_BOARD",
+        newValue: "REJECTED_BY_BOARD",
+        propagatedAt: now,
+      },
+      {
+        target: `${target.toUpperCase()}_Queue`,
+        previousValue: "idle",
+        newValue: "revision_required",
+        propagatedAt: now,
+      },
+      {
+        target: "DeanOffice_Notification",
+        previousValue: "idle",
+        newValue: "board_rejection_alert",
+        propagatedAt: now,
+      },
+    ];
+
+    this.deps.audit.write({
+      actorUserId: input.decidedBy,
+      actorRole: UserRole.FacultyBoardMember,
+      actionType: "BOARD_REJECT",
+      affectedEntityId: pkg.packageId,
+      affectedEntityType: "EvaluationPackage",
+      previousValue: { lifecycle: "FORWARDED_TO_BOARD" },
+      newValue: {
+        lifecycle: "REJECTED_BY_BOARD",
+        loopbackTarget: target,
+        rejectionReason: input.rejectionReason,
+      },
+    });
+
+    return {
+      packageId: pkg.packageId,
+      approved: false,
+      newLifecycle: "REJECTED_BY_BOARD",
+      statePropagation: propagation,
+      notifications: [deanNotif],
+      rejectionDispatch: {
+        loopbackTarget: target,
+        deanNotified: true,
+      },
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   TC-571-NOTIFY  —  Publish with decoupled notifications
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async publish(input: PublishInput): Promise<PublishResult> {
+    const pkg = this.requirePackage(input.packageId);
+    const state = this.requireBoardState(input.packageId);
+
+    if (state.lifecycle !== "APPROVED_BY_BOARD") {
+      throw new ConflictError(
+        "INVALID_LIFECYCLE",
+        `Publish requires APPROVED_BY_BOARD. Current: '${state.lifecycle}'.`,
+      );
+    }
+
+    // ── COMMIT FIRST — database write is the source of truth. ─────────────
+    const publishedAt = new Date().toISOString();
+    state.publishedAt = publishedAt;
+    state.lifecycle = "PUBLISHED";
+    this.deps.boardStates.save(state);
+
+    for (const appId of [...pkg.asilApplicationIds, ...pkg.yedekApplicationIds]) {
+      const app = await this.deps.applications.findById(appId);
+      if (!app) continue;
+      app.currentStatus = ApplicationStatus.ResultsPublished;
+      app.lastModifiedAt = publishedAt;
+      await this.deps.applications.save(app);
+    }
+
+    this.deps.audit.write({
+      actorUserId: input.publishedBy,
+      actorRole: UserRole.OidbOfficer,
+      actionType: "PUBLISH",
+      affectedEntityId: pkg.packageId,
+      affectedEntityType: "EvaluationPackage",
+      previousValue: { lifecycle: "APPROVED_BY_BOARD" },
+      newValue: { lifecycle: "PUBLISHED", publishedAt },
+    });
+
+    // ── NOW dispatch notifications — failure cannot roll back the publish ─
+    const stubs: BoardNotificationStub[] = [];
+    let anyFailed = false;
+
+    for (const appId of pkg.asilApplicationIds) {
+      const stub = this.dispatchDecoupled(state, {
+        recipientUserId: appId,
+        eventType: "RESULT_ADMITTED",
+        channel: "EMAIL",
+        subject: "Transfer Acceptance",
+        body: "Your transfer application has been approved by the Faculty Board.",
+      });
+      stubs.push(stub);
+      if (stub.status === "failed") anyFailed = true;
+    }
+    for (const appId of pkg.yedekApplicationIds) {
+      const stub = this.dispatchDecoupled(state, {
+        recipientUserId: appId,
+        eventType: "RESULT_WAITLISTED",
+        channel: "EMAIL",
+        subject: "Waitlist Notification",
+        body: "You are on the waitlist for transfer.",
+      });
+      stubs.push(stub);
+      if (stub.status === "failed") anyFailed = true;
+    }
+
+    this.deps.boardStates.save(state); // persist notification stubs
+
+    return {
+      packageId: pkg.packageId,
+      published: true,
+      publishedAt,
+      notifications: stubs,
+      hasNotifyErrors: anyFailed,
+      notifyErrorCode: anyFailed ? "571-NOTIFY" : null,
+      message: anyFailed
+        ? "Results published. Some notifications failed (571-NOTIFY) — publish unaffected."
+        : "Results published successfully. All notifications delivered.",
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //   Internal helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Dispatches a single notification via the shared NotificationService.
+   * The notification call is wrapped in try/catch so that a failure NEVER
+   * propagates out of the calling action (publish / reject).  This is the
+   * core contract of 571-NOTIFY decoupling.
+   */
+  private dispatchDecoupled(
+    state: BoardReviewState,
+    params: {
+      recipientUserId: string;
+      eventType: string;
+      channel: "EMAIL" | "DASHBOARD_ALERT";
+      subject: string;
+      body: string;
+    },
+  ): BoardNotificationStub {
+    const now = new Date().toISOString();
+    try {
+      const record = this.deps.notifications.send(params);
+      const stub: BoardNotificationStub = {
+        notificationId: record.notificationId,
+        recipientUserId: record.recipientUserId,
+        subject: record.subject,
+        channel: params.channel,
+        status: record.isDelivered ? "delivered" : "failed",
+        errorCode: record.isDelivered ? null : "571-NOTIFY",
+        decoupled: true,
+        createdAt: record.createdAt,
+      };
+      state.notifications.push(stub);
+      return stub;
+    } catch {
+      // Notification service threw — still record a stub, never block caller.
+      const stub: BoardNotificationStub = {
+        notificationId: randomUUID(),
+        recipientUserId: params.recipientUserId,
+        subject: params.subject,
+        channel: params.channel,
+        status: "failed",
+        errorCode: "571-NOTIFY",
+        decoupled: true,
+        createdAt: now,
+      };
+      state.notifications.push(stub);
+      return stub;
+    }
+  }
+
+  private buildSignature(
+    token: string,
+    signatoryId: string,
+    documentHash: string,
+  ): DeanSignature {
+    const now = new Date();
+    return {
+      token,
+      signedBy: signatoryId,
+      issuedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + TOKEN_TTL_MS).toISOString(),
+      documentHashAtSignature: documentHash,
+      state: "valid",
+    };
+  }
+
+  private signatureFailure(
+    packageId: string,
+    token: string,
+    errorCode: "7C-EXPIRED" | "7C-INVALID",
+    message: string,
+  ): SignatureVerifyResult {
+    return {
+      packageId,
+      token,
+      state: errorCode === "7C-EXPIRED" ? "expired" : "invalid",
+      errorCode,
+      message,
+      clearedAt: null,
+    };
+  }
+
+  private canonicalInput(pkg: EvaluationPackage) {
+    return {
+      packageId: pkg.packageId,
+      departmentId: pkg.departmentId,
+      periodId: pkg.periodId,
+      asilApplicationIds: pkg.asilApplicationIds,
+      yedekApplicationIds: pkg.yedekApplicationIds,
+      redApplicationIds: pkg.redApplicationIds,
+      intibakTableIds: pkg.intibakTableIds,
+    };
+  }
+
+  private requirePackage(packageId: string): EvaluationPackage {
+    const pkg = this.deps.packages.findById(packageId);
+    if (!pkg) throw new NotFoundError(`Package not found: ${packageId}`);
+    return pkg;
+  }
+
+  private requireBoardState(packageId: string): BoardReviewState {
+    const state = this.deps.boardStates.findById(packageId);
+    if (!state) {
+      throw new NotFoundError(
+        `BoardReviewState not found for package: ${packageId}. ` +
+          `Has the package been forwarded to the board?`,
+      );
+    }
+    return state;
+  }
+}
+
+// ─── Module-level helpers ────────────────────────────────────────────────────
+
+function loopbackToApplicationStatus(target: LoopbackTarget): ApplicationStatus {
+  switch (target) {
+    case "oidb": return ApplicationStatus.PendingOidbVerification;
+    case "ydyo": return ApplicationStatus.InReviewYdyo;
+    case "dean": return ApplicationStatus.PendingDeansOfficeReview;
+    case "ygk":
+    default:     return ApplicationStatus.InReviewYgk;
+  }
+}

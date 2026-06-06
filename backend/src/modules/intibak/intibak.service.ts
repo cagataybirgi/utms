@@ -29,6 +29,10 @@ import {
 import { OcrParserMockClient } from "../../shared/external/ocr-parser-client";
 import { AuditLogger } from "../../shared/audit";
 import { SuggestionEngine } from "./suggestion-engine";
+import {
+  BoardReviewState,
+  IBoardReviewStateRepository,
+} from "../board/board.types";
 
 export interface IntibakServiceDeps {
   applications: IAsyncApplicationRepository;
@@ -36,6 +40,7 @@ export interface IntibakServiceDeps {
   intibakTables: IIntibakRepository;
   curriculum: ICurriculumRepository;
   packages: IPackageRepository;
+  boardStates: IBoardReviewStateRepository;
   ocr: OcrParserMockClient;
   audit: AuditLogger;
   suggestions?: SuggestionEngine;
@@ -385,6 +390,27 @@ export class IntibakService {
       a.currentStatus = ApplicationStatus.PendingDeansOfficeReview;
       await this.deps.applications.save(a);
     }
+
+    // Open the Faculty Board's review surface for this package. From this
+    // point the Dean's office can issue/verify signatures (TC-7C) and the
+    // Board can run the integrity / approval / publish flow (702-HASH, 7A/E,
+    // 571-NOTIFY). See BoardService for those state machines.
+    const now = new Date().toISOString();
+    const boardState: BoardReviewState = {
+      packageId: pkg.packageId,
+      lifecycle: "PENDING_BOARD_REVIEW",
+      deanSignature: null,
+      boardDecision: null,
+      hashLocked: false,
+      hashLockedAt: null,
+      hashLockReason: null,
+      publishedAt: null,
+      notifications: [],
+      createdAt: now,
+      lastModifiedAt: now,
+    };
+    this.deps.boardStates.put(boardState);
+
     this.deps.audit.write({
       actorUserId,
       actorRole: UserRole.YgkChair,
