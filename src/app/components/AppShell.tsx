@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getActivePeriod, type ActivePeriodDto } from '../lib/api/document-upload';
-import { Button } from './ui/button';
+import { ProfileSettings } from './ProfileSettings';
 import { Badge } from './ui/badge';
 import {
   Bell,
@@ -123,6 +123,9 @@ export function AppShell({
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>(MOCK_NOTIFICATIONS[currentRole] || []);
   const [activePeriod, setActivePeriod] = useState<ActivePeriodDto | null>(null);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [localDisplayName, setLocalDisplayName] = useState(`${user.name} ${user.surname}`);
+  const [localEmail, setLocalEmail] = useState(user.email);
 
   useEffect(() => {
     getActivePeriod().then(setActivePeriod).catch(() => {});
@@ -296,10 +299,10 @@ export function AppShell({
                 className="flex items-center space-x-3 p-1.5 hover:bg-gray-50 rounded-xl transition-all border border-transparent hover:border-gray-100"
               >
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-md transform rotate-3" style={{ backgroundColor: '#C00000' }}>
-                  {user.name[0]}{user.surname[0]}
+                  {localDisplayName[0]?.toUpperCase()}
                 </div>
                 <div className="text-left hidden lg:block">
-                  <div className="text-xs font-bold text-gray-900 leading-none">{user.name} {user.surname}</div>
+                  <div className="text-xs font-bold text-gray-900 leading-none">{localDisplayName}</div>
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter mt-1">{currentRole}</div>
                 </div>
                 <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${showUserMenu ? 'rotate-180' : ''}`} />
@@ -314,8 +317,8 @@ export function AppShell({
                   />
                   <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="px-4 py-3 border-b border-gray-100">
-                      <div className="text-sm font-bold text-gray-900">{user.name} {user.surname}</div>
-                      <div className="text-xs font-medium text-gray-500 truncate">{user.email}</div>
+                      <div className="text-sm font-bold text-gray-900">{localDisplayName}</div>
+                      <div className="text-xs font-medium text-gray-500 truncate">{localEmail}</div>
                       <Badge className="mt-2 text-[10px] font-bold uppercase tracking-wider border-none bg-red-50 text-[#C00000]">
                         {currentRole}
                       </Badge>
@@ -335,6 +338,7 @@ export function AppShell({
                         </button>
                       )}
                       <button
+                        onClick={() => { setShowUserMenu(false); setShowProfileSettings(true); }}
                         className="w-full text-left px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors flex items-center"
                       >
                         <UserIcon className="w-4 h-4 mr-2 opacity-70" />
@@ -368,6 +372,17 @@ export function AppShell({
           </div>
         </main>
       </div>
+
+      {showProfileSettings && (
+        <ProfileSettings
+          user={user}
+          onClose={() => setShowProfileSettings(false)}
+          onProfileUpdated={(name, email) => {
+            setLocalDisplayName(name);
+            setLocalEmail(email);
+          }}
+        />
+      )}
     </div>
   );
 }

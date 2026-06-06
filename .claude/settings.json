@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find . -name \"tsc\" -not -path \"*/\\\\.*\")",
+      "Bash(cd \"/c/Users/Admin/Ders/CENG316/caganutms/utms\" && ls node_modules/.bin/ | grep tsc)",
+      "Read(//c/c/Users/Admin/Ders/CENG316/caganutms/utms/node_modules/**)"
+    ]
+  }
+}
