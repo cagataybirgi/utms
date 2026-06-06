@@ -29,6 +29,7 @@ export function buildIntibakRouter(container: AppContainer): Router {
     intibakTables: container.intibakTables,
     curriculum: container.curriculum,
     packages: container.packages,
+    boardStates: container.boardStates,
     ocr: container.ocr,
     audit,
   });

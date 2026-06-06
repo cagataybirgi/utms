@@ -10,6 +10,7 @@ import { buildRankingRouter } from "./modules/ranking/ranking.routes";
 import { buildDeanRouter } from "./modules/dean/dean.routes";
 import { buildAuthRouter } from "./modules/auth/auth.routes";
 import { buildPeriodRouter } from "./modules/period/period.routes";
+import { buildBoardRouter } from "./modules/board/board.routes";
 
 export interface CreateAppOptions {
   container?: AppContainer;
@@ -57,6 +58,7 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.use("/api/ranking", auth, buildRankingRouter(container));
   app.use("/api/dean", auth, buildDeanRouter(container));
   app.use("/api/ygk", auth, buildIntibakRouter(container));
+  app.use("/api/board", auth, buildBoardRouter(container));
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({ error: "NOT_FOUND" });
