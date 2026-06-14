@@ -12,6 +12,7 @@ import { buildAuthRouter } from "./modules/auth/auth.routes";
 import { buildPeriodRouter } from "./modules/period/period.routes";
 import { buildBoardRouter } from "./modules/board/board.routes";
 import { buildProfileRouter } from "./modules/profile/profile.routes";
+import { buildYdyoRouter } from "./modules/ydyo/ydyo.routes";
 
 export interface CreateAppOptions {
   container?: AppContainer;
@@ -35,7 +36,7 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.use(express.json({ limit: "12mb" }));
 
   app.get("/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", scope: "Scenario 1 (Login) & Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 5 (Ranking) & Scenario 6 (Intibak)" });
+    res.json({ status: "ok", scope: "Scenario 1 (Login) & Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 3.1 (YDYO) & Scenario 5 (Ranking) & Scenario 6 (Intibak)" });
   });
 
   // DEV-ONLY: reset in-memory state (auth locks, reset tokens, rate limits,
@@ -68,6 +69,7 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.use("/api/applications", auth, buildApplicationRouter());
   app.use("/api/documents", auth, buildDocumentUploadRouter());
   app.use("/api/oidb", auth, buildOidbRouter(container));
+  app.use("/api/ydyo", auth, buildYdyoRouter(container));
   app.use("/api/ranking", auth, buildRankingRouter(container));
   app.use("/api/dean", auth, buildDeanRouter(container));
   app.use("/api/ygk", auth, buildIntibakRouter(container));

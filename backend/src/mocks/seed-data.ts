@@ -263,6 +263,11 @@ function buildApplication(partial: Partial<Application> & { applicationId: strin
     routedToYdyo: partial.routedToYdyo ?? false,
     routedToDeansOffice: partial.routedToDeansOffice ?? false,
     ydyoExempt: partial.ydyoExempt ?? false,
+    languageProof: partial.languageProof,
+    ydyoDecision: partial.ydyoDecision,
+    ydyoReviewNotes: partial.ydyoReviewNotes,
+    ydyoReviewedBy: partial.ydyoReviewedBy,
+    ydyoReviewedAt: partial.ydyoReviewedAt,
     rankingCategory: partial.rankingCategory,
     intibakTableId: partial.intibakTableId,
     submittedAt: partial.submittedAt ?? nowIso(),
@@ -369,6 +374,65 @@ export function buildSeedApplications(): Application[] {
       studentFullName: "Mert Koc",
       currentStatus: ApplicationStatus.RankedAsil,
       rankingCategory: RankingCategory.Asil,
+    }),
+
+    // ── Scenario 3.1 (YDYO): language review queue fixtures ───────────────
+    buildApplication({
+      applicationId: "app-ydyo-1",
+      studentId: "student-ahmet-yilmaz",
+      studentFullName: "Mert Aksoy",
+      currentStatus: ApplicationStatus.InReviewYdyo,
+      routedToYdyo: true,
+      languageProof: {
+        examType: "TOEFL_IBT",
+        score: 88,
+        examDate: "2025-08-15",
+        validUntil: "2027-08-15",
+        certificateNumber: "TOEFL-2025-88412",
+      },
+    }),
+    buildApplication({
+      applicationId: "app-ydyo-2",
+      studentId: "student-baris-tan",
+      studentFullName: "Selin Yuce",
+      targetDepartmentId: DEPT_EE,
+      currentStatus: ApplicationStatus.InReviewYdyo,
+      routedToYdyo: true,
+      languageProof: {
+        examType: "IELTS",
+        score: 7.5,
+        examDate: "2025-06-10",
+        validUntil: "2027-06-10",
+        certificateNumber: "IELTS-2025-7530",
+      },
+    }),
+    buildApplication({
+      applicationId: "app-ydyo-3",
+      studentId: "student-ela-oz",
+      studentFullName: "Kaan Er",
+      currentStatus: ApplicationStatus.InReviewYdyo,
+      routedToYdyo: true,
+      languageProof: {
+        examType: "YDS",
+        score: 62,
+        examDate: "2024-04-20",
+        validUntil: "2029-04-20",
+        certificateNumber: "YDS-2024-6201",
+      },
+    }),
+    buildApplication({
+      applicationId: "app-ydyo-4",
+      studentId: "student-zeynep-demir",
+      studentFullName: "Derya Ak",
+      currentStatus: ApplicationStatus.InReviewYdyo,
+      routedToYdyo: true,
+      languageProof: {
+        examType: "TOEFL_IBT",
+        score: 92,
+        examDate: "2025-09-01",
+        validUntil: "2027-09-01",
+        certificateNumber: "TOEFL-2025-92100",
+      },
     }),
     // ── Test Case 6K: Selin Aksoy — başarılı OCR ile transkript okuma ───────
     buildApplication({
@@ -702,6 +766,11 @@ function seedDocuments(c: AppContainer): void {
   ];
   for (const appId of intibakApps) {
     c.documents.put(makeDoc(appId, DocumentType.Transcript, true));
+  }
+
+  const ydyoApps = ["app-ydyo-1", "app-ydyo-2", "app-ydyo-3", "app-ydyo-4"];
+  for (const appId of ydyoApps) {
+    c.documents.put(makeDoc(appId, DocumentType.LanguageProof, true));
   }
 }
 

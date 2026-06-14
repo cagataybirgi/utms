@@ -1,21 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AppShell } from '../AppShell';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
-import { 
-  Languages, 
-  Clock, 
+import {
+  Languages,
+  Clock,
   CheckCircle2,
   XCircle,
   Eye,
-  Filter,
   Search,
-  ArrowLeft
+  ArrowLeft,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import type { User } from '../../App';
 import { LanguageReviewDetail } from './LanguageReviewDetail';
+import {
+  ydyoApi,
+  YdyoApiError,
+  departmentLabel,
+  maskTckn,
+  formatDate,
+  EXAM_TYPE_LABELS,
+  type YdyoQueueItem,
+  type LanguageDecision,
+} from '../../lib/api/ydyo';
 
 interface YDYODashboardProps {
   user: User;
@@ -24,73 +35,46 @@ interface YDYODashboardProps {
 }
 
 type Section = 'dashboard';
+type UiStatus = 'pending' | 'successful' | 'exempt' | 'unsuccessful';
 
-const MOCK_APPLICATIONS = [
-  {
-    id: 'APP-2025-001234',
-    studentName: 'Ahmet Yılmaz',
-    program: 'Computer Engineering',
-    faculty: 'Engineering Faculty',
-    languageDoc: 'TOEFL iBT',
-    score: '88',
-    submittedDate: '2025-01-12',
-    status: 'pending'
-  },
-  {
-    id: 'APP-2025-001239',
-    studentName: 'Zeynep Kara',
-    program: 'Electrical Engineering',
-    faculty: 'Engineering Faculty',
-    languageDoc: 'YDS',
-    score: '75',
-    submittedDate: '2025-01-13',
-    status: 'pending'
-  },
-  {
-    id: 'APP-2025-001242',
-    studentName: 'Mustafa Çelik',
-    program: 'Mechanical Engineering',
-    faculty: 'Engineering Faculty',
-    languageDoc: 'IELTS',
-    score: '6.5',
-    submittedDate: '2025-01-11',
-    status: 'successful'
-  },
-  {
-    id: 'APP-2025-001250',
-    studentName: 'Elif Demir',
-    program: 'Industrial Engineering',
-    faculty: 'Engineering Faculty',
-    languageDoc: 'TOEFL iBT',
-    score: '92',
-    submittedDate: '2025-01-14',
-    status: 'exempt'
-  },
-  {
-    id: 'APP-2025-001255',
-    studentName: 'Mehmet Aydın',
-    program: 'Civil Engineering',
-    faculty: 'Engineering Faculty',
-    languageDoc: 'IELTS',
-    score: '5.5',
-    submittedDate: '2025-01-15',
-    status: 'unsuccessful'
+function uiStatus(decision: LanguageDecision | null): UiStatus {
+  switch (decision) {
+    case 'SUCCESSFUL':
+      return 'successful';
+    case 'EXEMPT':
+      return 'exempt';
+    case 'UNSUCCESSFUL':
+      return 'unsuccessful';
+    default:
+      return 'pending';
   }
-];
+}
 
 export function YDYODashboard({ user, onLogout, onSwitchRole }: YDYODashboardProps) {
   const [currentSection, setCurrentSection] = useState<Section>('dashboard');
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [items, setItems] = useState<YdyoQueueItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleReview = (appId: string) => {
-    setSelectedAppId(appId);
-  };
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    ydyoApi
+      .queue(user.id)
+      .then((r) => setItems(r.items))
+      .catch((e) => setError(e instanceof YdyoApiError ? e.message : 'Kuyruk yüklenemedi.'))
+      .finally(() => setLoading(false));
+  }, [user.id]);
 
-  const handleBackToQueue = () => {
-    setSelectedAppId(null);
-  };
+  useEffect(() => {
+    if (!selectedAppId) load();
+  }, [selectedAppId, load]);
+
+  const handleReview = (appId: string) => setSelectedAppId(appId);
+  const handleBackToQueue = () => setSelectedAppId(null);
 
   const renderDashboardContent = () => {
     if (selectedAppId) {
@@ -100,37 +84,43 @@ export function YDYODashboard({ user, onLogout, onSwitchRole }: YDYODashboardPro
             <ArrowLeft className="w-4 h-4 mr-2" />
             Geri Dön
           </Button>
-          <LanguageReviewDetail
-            applicationId={selectedAppId}
-            onBack={handleBackToQueue}
-          />
+          <LanguageReviewDetail applicationId={selectedAppId} userId={user.id} onBack={handleBackToQueue} />
         </div>
       );
     }
 
-    const pendingCount = MOCK_APPLICATIONS.filter(a => a.status === 'pending').length;
-    const successfulCount = MOCK_APPLICATIONS.filter(a => a.status === 'successful').length;
-    const unsuccessfulCount = MOCK_APPLICATIONS.filter(a => a.status === 'unsuccessful').length;
-    const exemptCount = MOCK_APPLICATIONS.filter(a => a.status === 'exempt').length;
+    const pendingCount = items.filter((a) => uiStatus(a.decision) === 'pending').length;
+    const successfulCount = items.filter((a) => uiStatus(a.decision) === 'successful').length;
+    const unsuccessfulCount = items.filter((a) => uiStatus(a.decision) === 'unsuccessful').length;
+    const exemptCount = items.filter((a) => uiStatus(a.decision) === 'exempt').length;
 
-    const filteredApplications = MOCK_APPLICATIONS.filter(app => {
-      const matchesSearch = searchQuery === '' ||
-        app.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        app.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        app.program.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
+    const filteredApplications = items.filter((app) => {
+      const matchesSearch =
+        searchQuery === '' ||
+        app.studentFullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        app.applicationId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        departmentLabel(app.targetDepartmentId).toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || uiStatus(app.decision) === statusFilter;
       return matchesSearch && matchesStatus;
     });
 
     return (
       <div className="space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-gray-900 mb-2">YDYO Memur Paneli</h1>
-          <p className="text-gray-600">Yabancı Diller Yüksekokulu - Dil Yeterlilik Değerlendirmesi</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-gray-900 mb-2">YDYO Memur Paneli</h1>
+            <p className="text-gray-600">Yabancı Diller Yüksekokulu - Dil Yeterlilik Değerlendirmesi</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Yenile
+          </Button>
         </div>
 
-        {/* Statistics */}
+        {error && (
+          <Card className="p-4 border-red-200 bg-red-50 text-sm text-red-700">{error}</Card>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
           <Card className="p-6">
             <div className="flex items-center justify-between">
@@ -184,7 +174,7 @@ export function YDYODashboard({ user, onLogout, onSwitchRole }: YDYODashboardPro
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-gray-600 mb-1">Toplam</div>
-                <div className="text-2xl text-gray-900">{MOCK_APPLICATIONS.length}</div>
+                <div className="text-2xl text-gray-900">{items.length}</div>
               </div>
               <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ backgroundColor: '#C00000' }}>
                 <Languages className="w-6 h-6 text-white" />
@@ -193,7 +183,6 @@ export function YDYODashboard({ user, onLogout, onSwitchRole }: YDYODashboardPro
           </Card>
         </div>
 
-        {/* Guidelines */}
         <Card className="p-6">
           <h2 className="text-gray-900 mb-4">Dil Yeterlilik Kriterleri</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -218,7 +207,6 @@ export function YDYODashboard({ user, onLogout, onSwitchRole }: YDYODashboardPro
           </div>
         </Card>
 
-        {/* Table */}
         <Card className="p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-gray-900">Değerlendirme Kuyruğu</h2>
@@ -246,13 +234,14 @@ export function YDYODashboard({ user, onLogout, onSwitchRole }: YDYODashboardPro
               </select>
             </div>
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200">
                   <th className="text-left py-3 px-4 text-sm text-gray-700">Başvuru ID</th>
                   <th className="text-left py-3 px-4 text-sm text-gray-700">Öğrenci</th>
+                  <th className="text-left py-3 px-4 text-sm text-gray-700">TCKN</th>
                   <th className="text-left py-3 px-4 text-sm text-gray-700">Program</th>
                   <th className="text-left py-3 px-4 text-sm text-gray-700">Dil Belgesi</th>
                   <th className="text-left py-3 px-4 text-sm text-gray-700">Puan</th>
@@ -262,39 +251,45 @@ export function YDYODashboard({ user, onLogout, onSwitchRole }: YDYODashboardPro
                 </tr>
               </thead>
               <tbody>
-                {filteredApplications.length === 0 ? (
+                {loading ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-gray-500">
+                    <td colSpan={9} className="py-8 text-center text-gray-500">
+                      <Loader2 className="w-5 h-5 mx-auto animate-spin" />
+                    </td>
+                  </tr>
+                ) : filteredApplications.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-8 text-center text-gray-500">
                       Kriterlere uygun başvuru bulunamadı
                     </td>
                   </tr>
                 ) : (
-                  filteredApplications.map((app) => (
-                    <tr key={app.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4 text-sm text-gray-900">{app.id}</td>
-                      <td className="py-3 px-4 text-sm text-gray-900">{app.studentName}</td>
-                      <td className="py-3 px-4 text-sm text-gray-600">{app.program}</td>
-                      <td className="py-3 px-4 text-sm text-gray-900">{app.languageDoc}</td>
-                      <td className="py-3 px-4 text-sm text-gray-900">{app.score}</td>
-                      <td className="py-3 px-4 text-sm text-gray-600">{app.submittedDate}</td>
-                      <td className="py-3 px-4">
-                        {app.status === 'pending' && <Badge className="bg-yellow-100 text-yellow-800">Bekliyor</Badge>}
-                        {app.status === 'successful' && <Badge className="bg-green-100 text-green-800">Başarılı</Badge>}
-                        {app.status === 'exempt' && <Badge className="bg-blue-100 text-blue-800">Muaf</Badge>}
-                        {app.status === 'unsuccessful' && <Badge className="bg-red-100 text-red-800">Başarısız</Badge>}
-                      </td>
-                      <td className="py-3 px-4">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => handleReview(app.id)}
-                        >
-                          <Eye className="w-4 h-4 mr-1" />
-                          İncele
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
+                  filteredApplications.map((app) => {
+                    const st = uiStatus(app.decision);
+                    return (
+                      <tr key={app.applicationId} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-3 px-4 text-sm text-gray-900 font-mono">{app.applicationId}</td>
+                        <td className="py-3 px-4 text-sm text-gray-900">{app.studentFullName}</td>
+                        <td className="py-3 px-4 text-sm text-gray-600 font-mono">{maskTckn(app.studentTckn)}</td>
+                        <td className="py-3 px-4 text-sm text-gray-600">{departmentLabel(app.targetDepartmentId)}</td>
+                        <td className="py-3 px-4 text-sm text-gray-900">{EXAM_TYPE_LABELS[app.examType]}</td>
+                        <td className="py-3 px-4 text-sm text-gray-900 font-bold">{app.score}</td>
+                        <td className="py-3 px-4 text-sm text-gray-600">{formatDate(app.submittedAt)}</td>
+                        <td className="py-3 px-4">
+                          {st === 'pending' && <Badge className="bg-yellow-100 text-yellow-800">Bekliyor</Badge>}
+                          {st === 'successful' && <Badge className="bg-green-100 text-green-800">Başarılı</Badge>}
+                          {st === 'exempt' && <Badge className="bg-blue-100 text-blue-800">Muaf</Badge>}
+                          {st === 'unsuccessful' && <Badge className="bg-red-100 text-red-800">Başarısız</Badge>}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button size="sm" variant="outline" onClick={() => handleReview(app.applicationId)}>
+                            <Eye className="w-4 h-4 mr-1" />
+                            İncele
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
