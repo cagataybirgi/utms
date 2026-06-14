@@ -41,8 +41,10 @@ const SEED_PASSWORDS: Record<string, string> = {
   "user-ygk-cmpe-1": "ygk123",
   "user-ygk-chair-cmpe": "ygkchair123",
   "user-deans-eng": "dean123",
+  "user-board-eng": "board123",
   "user-admin": "admin123",
   "student-ahmet-yilmaz": "ValidPass1!",
+  "student-zeynep-lowgpa": "ValidPass1!",
 };
 
 /** Scenario 1 + Neon seed — same users/passwords as the in-memory container. */
@@ -56,9 +58,14 @@ export function buildSeedUsers(): User[] {
       roles: [UserRole.OidbOfficer],
     },
     {
+      // YDYO (Yabanci Diller Yuksekokulu) language-review officer.
+      // Restores the credentials that were deleted from the deployed DB — without
+      // this account no one can log into the YDYO dashboard or clear the
+      // IN_REVIEW_YDYO language-proficiency step, stalling every application that
+      // is routed to YDYO.
       userId: "user-ydyo-1",
       tckn: "55555555555",
-      fullName: "Yabanci Diller YO (YDYO Officer)",
+      fullName: "Yasemin Demir (YDYO Officer)",
       email: "ydyo1@iyte.edu.tr",
       roles: [UserRole.YdyoOfficer],
     },
@@ -87,6 +94,19 @@ export function buildSeedUsers(): User[] {
       facultyId: FACULTY_ENG,
     },
     {
+      // Faculty Board (Fakulte Yonetim Kurulu) member — Engineering.
+      // The Scenario 7 board endpoints are gated to FACULTY_BOARD_MEMBER /
+      // SYSTEM_ADMIN. With this account missing from the seed, the Faculty Board
+      // review queue was unreachable, so TC-7A could never be executed and every
+      // downstream board case (7B–7G) was BLOCKED by cascade.
+      userId: "user-board-eng",
+      tckn: "66666666666",
+      fullName: "Prof. Dr. Aylin Kaya (Faculty Board, Engineering)",
+      email: "board-eng@iyte.edu.tr",
+      roles: [UserRole.FacultyBoardMember],
+      facultyId: FACULTY_ENG,
+    },
+    {
       userId: "user-admin",
       tckn: "99999999999",
       fullName: "System Administrator",
@@ -98,6 +118,18 @@ export function buildSeedUsers(): User[] {
       tckn: "12345678901",
       fullName: "Ahmet Yilmaz",
       email: "ahmet.yilmaz@iyte.edu.tr",
+      roles: [UserRole.Student],
+    },
+    {
+      // Low-GPA applicant (GNO 2.0) used by Test Case 2A/2C. The matching YÖKSİS
+      // record already exists in the frontend mock (TCKN 11223344556) but had no
+      // login account, so the eligibility-block case could not be executed end to
+      // end. This account connects the two so the "GPA below 2.50 → submission
+      // blocked" path is reproducible on the deployed site.
+      userId: "student-zeynep-lowgpa",
+      tckn: "11223344556",
+      fullName: "Zeynep Yilmaz",
+      email: "zeynep.yilmaz@iyte.edu.tr",
       roles: [UserRole.Student],
     },
     {

@@ -11,8 +11,23 @@ import { DepartmentId, FacultyId, TransferType, DEPARTMENT_FACULTY } from '../..
 
 // ─── Mock external API responses ─────────────────────────────────────────────
 
-// Set to true to simulate API down scenario (Test Case 2D)
-const SIMULATE_API_DOWN = false;
+// Test Case 2D — simulate external API (YÖKSİS / ÖSYM) downtime.
+// Previously a hard-coded compile-time `false`, so the manual-entry fallback
+// could not be exercised on the deployed site without a rebuild (and severing
+// real internet does nothing, because these are client-side mocks). It is now
+// runtime-controllable: append `?apiDown=1` to the URL (or set localStorage
+// `UTMS_SIMULATE_API_DOWN=1`) to force the down path; `?apiDown=0` forces it off.
+const SIMULATE_API_DOWN: boolean = (() => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('apiDown') === '1') return true;
+    if (q.get('apiDown') === '0') return false;
+    return window.localStorage.getItem('UTMS_SIMULATE_API_DOWN') === '1';
+  } catch {
+    return false;
+  }
+})();
 
 const API_TIMEOUT_MS = 5000;
 

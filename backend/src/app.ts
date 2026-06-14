@@ -47,6 +47,17 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
       resetContainer(container);
       res.json({ status: "ok", message: "In-memory state reset to seed baseline." });
     });
+
+    // Test Case 1H — let QA simulate the e-mail provider being offline without
+    // any special privilege. POST { available: false } before a password-reset
+    // request to exercise the EMAIL_SERVICE_DOWN path, then { available: true }
+    // (or /api/dev/reset) to restore. This is the manual-test hook that was
+    // missing when TC-1H was reported as "could not be tested".
+    app.post("/api/dev/email-service", (req: Request, res: Response) => {
+      const available = req.body?.available !== false;
+      container.auth.setEmailServiceAvailable(available);
+      res.json({ status: "ok", emailServiceAvailable: available });
+    });
   }
 
   // Scenario 1 (Login) — pre-authentication endpoints, mounted before mock-auth.
