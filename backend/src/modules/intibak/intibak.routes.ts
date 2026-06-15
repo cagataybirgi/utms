@@ -6,8 +6,14 @@ import { asyncHandler } from "../../shared/middleware/async-handler";
 import { UserRole } from "../../shared/types";
 import {
   IAsyncApplicationRepository,
+  IAsyncBoardReviewStateRepository,
+  IAsyncPackageRepository,
   InMemoryAsyncApplicationRepository,
+  InMemoryAsyncBoardReviewStateRepository,
+  InMemoryAsyncPackageRepository,
   PrismaApplicationRepository,
+  PrismaBoardReviewStateRepository,
+  PrismaPackageRepository,
 } from "../../shared/repositories";
 import { IntibakService } from "./intibak.service";
 import { IntibakController } from "./intibak.controller";
@@ -21,6 +27,12 @@ export function buildIntibakRouter(container: AppContainer): Router {
   const applications: IAsyncApplicationRepository = useDatabase
     ? new PrismaApplicationRepository()
     : new InMemoryAsyncApplicationRepository(container.applications);
+  const packages: IAsyncPackageRepository = useDatabase
+    ? new PrismaPackageRepository()
+    : new InMemoryAsyncPackageRepository(container.packages);
+  const boardStates: IAsyncBoardReviewStateRepository = useDatabase
+    ? new PrismaBoardReviewStateRepository()
+    : new InMemoryAsyncBoardReviewStateRepository(container.boardStates);
 
   const audit = new AuditLogger(container.audit);
   const service = new IntibakService({
@@ -28,8 +40,8 @@ export function buildIntibakRouter(container: AppContainer): Router {
     documents: container.documents,
     intibakTables: container.intibakTables,
     curriculum: container.curriculum,
-    packages: container.packages,
-    boardStates: container.boardStates,
+    packages,
+    boardStates,
     ocr: container.ocr,
     audit,
   });

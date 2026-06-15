@@ -6,28 +6,39 @@ import { asyncHandler } from "../../shared/middleware/async-handler";
 import { UserRole } from "../../shared/types";
 import {
   IAsyncApplicationRepository,
+  IAsyncBoardReviewStateRepository,
+  IAsyncPackageRepository,
   InMemoryAsyncApplicationRepository,
+  InMemoryAsyncBoardReviewStateRepository,
+  InMemoryAsyncPackageRepository,
   PrismaApplicationRepository,
+  PrismaBoardReviewStateRepository,
+  PrismaPackageRepository,
 } from "../../shared/repositories";
 import { BoardService } from "./board.service";
 import { BoardController } from "./board.controller";
 
 export function buildBoardRouter(container: AppContainer): Router {
-  // Runtime reads/writes against Neon (Prisma) so the Board sees the same
-  // application data that Dean/YGK wrote. Tests run against the in-memory
-  // container (NODE_ENV=test) so the existing HTTP fixtures keep working.
+  // Runtime persists applications, packages and board states to Neon (Prisma).
+  // Tests run against the in-memory container (NODE_ENV=test).
   const useDatabase = process.env.NODE_ENV !== "test";
   const applications: IAsyncApplicationRepository = useDatabase
     ? new PrismaApplicationRepository()
     : new InMemoryAsyncApplicationRepository(container.applications);
+  const packages: IAsyncPackageRepository = useDatabase
+    ? new PrismaPackageRepository()
+    : new InMemoryAsyncPackageRepository(container.packages);
+  const boardStates: IAsyncBoardReviewStateRepository = useDatabase
+    ? new PrismaBoardReviewStateRepository()
+    : new InMemoryAsyncBoardReviewStateRepository(container.boardStates);
 
   const audit = new AuditLogger(container.audit);
   const notifications = new NotificationService(container.notifications);
   const service = new BoardService({
     applications,
     intibakTables: container.intibakTables,
-    packages: container.packages,
-    boardStates: container.boardStates,
+    packages,
+    boardStates,
     audit,
     notifications,
   });
@@ -56,8 +67,12 @@ export function buildBoardRouter(container: AppContainer): Router {
   );
 
   // ── Queue / detail ────────────────────────────────────────────────────────
-  r.get("/packages", packageViewerRoles, controller.listQueue);
-  r.get("/packages/:packageId", packageViewerRoles, controller.getDetail);
+  r.get("/packages", packageViewerRoles, asyncHandler(controller.listQueue));
+  r.get(
+    "/packages/:packageId",
+    packageViewerRoles,
+    asyncHandler(controller.getDetail),
+  );
 
   // ── TC-7B ─────────────────────────────────────────────────────────────────
   r.get(
@@ -68,19 +83,19 @@ export function buildBoardRouter(container: AppContainer): Router {
   r.post(
     "/packages/:packageId/return-to-ygk",
     signatureRoles,
-    controller.returnToYgkForClarification,
+    asyncHandler(controller.returnToYgkForClarification),
   );
 
   // ── 702-HASH ──────────────────────────────────────────────────────────────
   r.get(
     "/packages/:packageId/hash-check",
     packageViewerRoles,
-    controller.hashCheck,
+    asyncHandler(controller.hashCheck),
   );
   r.post(
     "/packages/:packageId/clear-hash-lock",
     requireRoles(UserRole.SystemAdmin),
-    controller.clearHashLock,
+    asyncHandler(controller.clearHashLock),
   );
 
   // ── TC-7C ─────────────────────────────────────────────────────────────────
