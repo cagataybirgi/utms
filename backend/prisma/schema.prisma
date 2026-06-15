@@ -316,6 +316,54 @@ model Appeal {
   @@map("appeals")
 }
 
+// ─── 6. EVALUATION PACKAGES & FACULTY BOARD REVIEW ───────────────────────────
+// Scenario 6 (YGK → Dean) emits an EvaluationPackage grouping all of a
+// department's Asil/Yedek/Red applicants. Scenario 7 (Faculty Board) tracks the
+// Dean-signature / Board-decision / publish workflow on a paired BoardReviewState
+// keyed by the same packageId (1:1). Both persisted in Neon so the queue
+// survives backend restarts.
+
+model EvaluationPackage {
+  packageId           String    @id @map("package_id")
+  departmentId        String    @map("department_id")
+  periodId            String    @map("period_id")
+  status              String    @db.VarChar(50)
+  asilApplicationIds  String[]  @map("asil_application_ids")
+  yedekApplicationIds String[]  @map("yedek_application_ids")
+  redApplicationIds   String[]  @map("red_application_ids")
+  intibakTableIds     String[]  @map("intibak_table_ids")
+  digitalSignatureBy  String?   @map("digital_signature_by")
+  digitalSignatureAt  DateTime? @map("digital_signature_at")
+  sentBy              String?   @map("sent_by")
+  sentAt              DateTime? @map("sent_at")
+
+  boardState BoardReviewState?
+
+  @@unique([departmentId, periodId], name: "departmentId_periodId")
+  @@index([status])
+  @@map("evaluation_packages")
+}
+
+model BoardReviewState {
+  packageId         String    @id @map("package_id")
+  lifecycle         String    @db.VarChar(50)
+  deanSignature     Json?     @map("dean_signature")
+  boardDecision     Json?     @map("board_decision")
+  hashLocked        Boolean   @default(false) @map("hash_locked")
+  hashLockedAt      DateTime? @map("hash_locked_at")
+  hashLockReason    String?   @map("hash_lock_reason")
+  clarificationNote String?   @map("clarification_note")
+  publishedAt       DateTime? @map("published_at")
+  notifications     Json      @default("[]")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  lastModifiedAt    DateTime  @updatedAt @map("last_modified_at")
+
+  package EvaluationPackage @relation(fields: [packageId], references: [packageId], onDelete: Cascade)
+
+  @@index([lifecycle])
+  @@map("board_review_states")
+}
+
 // ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
 // Not in the SQL schema but used by OIDB and Intibak notification logic.
 

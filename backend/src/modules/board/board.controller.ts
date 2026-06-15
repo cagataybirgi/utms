@@ -39,16 +39,16 @@ export class BoardController {
 
   // ─── Queue / detail ────────────────────────────────────────────────────────
 
-  listQueue = (req: Request, res: Response): void => {
+  listQueue = async (req: Request, res: Response): Promise<void> => {
     this.requireUser(req);
-    const items = this.service.listBoardQueue();
+    const items = await this.service.listBoardQueue();
     res.json({ items, count: items.length });
   };
 
-  getDetail = (req: Request, res: Response): void => {
+  getDetail = async (req: Request, res: Response): Promise<void> => {
     this.requireUser(req);
     const { packageId } = req.params;
-    const detail = this.service.getBoardPackage(packageId);
+    const detail = await this.service.getBoardPackage(packageId);
     res.json(detail);
   };
 
@@ -63,14 +63,14 @@ export class BoardController {
 
   // ─── 702-HASH ──────────────────────────────────────────────────────────────
 
-  hashCheck = (req: Request, res: Response): void => {
+  hashCheck = async (req: Request, res: Response): Promise<void> => {
     this.requireUser(req);
     const { packageId } = req.params;
-    const result = this.service.checkHashIntegrity(packageId);
+    const result = await this.service.checkHashIntegrity(packageId);
     if (!result.isMatch) {
       res.status(409).json({
         error: "702-HASH",
-        message: "Document integrity violation detected.",
+        message: "Belge bütünlüğü ihlali tespit edildi.",
         details: result,
       });
       return;
@@ -78,11 +78,11 @@ export class BoardController {
     res.json(result);
   };
 
-  clearHashLock = (req: Request, res: Response): void => {
+  clearHashLock = async (req: Request, res: Response): Promise<void> => {
     this.requireUser(req);
     const { packageId } = req.params;
     const body = ClearHashLockSchema.parse(req.body);
-    this.service.clearHashLock(packageId, body.newSignatureToken, body.signatoryId);
+    await this.service.clearHashLock(packageId, body.newSignatureToken, body.signatoryId);
     res.json({ packageId, cleared: true });
   };
 
@@ -118,11 +118,11 @@ export class BoardController {
 
   // ─── TC-7B  —  Return to YGK with clarification note ───────────────────────
 
-  returnToYgkForClarification = (req: Request, res: Response): void => {
+  returnToYgkForClarification = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { packageId } = req.params;
     const body = ReturnForClarificationSchema.parse(req.body);
-    const result = this.service.returnToYgkForClarification({
+    const result = await this.service.returnToYgkForClarification({
       packageId,
       requestedBy: userId,
       note: body.note,

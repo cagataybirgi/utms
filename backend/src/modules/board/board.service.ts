@@ -7,8 +7,9 @@ import {
 } from "../../shared/types";
 import {
   IAsyncApplicationRepository,
+  IAsyncBoardReviewStateRepository,
+  IAsyncPackageRepository,
   IIntibakRepository,
-  IPackageRepository,
 } from "../../shared/repositories";
 import { AuditLogger, NotificationService } from "../../shared/audit";
 import {
@@ -26,7 +27,6 @@ import {
   ConfirmForPublicationResult,
   DeanSignature,
   HashCheckResult,
-  IBoardReviewStateRepository,
   IntibakCompletenessResult,
   LoopbackTarget,
   PublishInput,
@@ -42,8 +42,8 @@ import {
 export interface BoardServiceDeps {
   applications: IAsyncApplicationRepository;
   intibakTables: IIntibakRepository;
-  packages: IPackageRepository;
-  boardStates: IBoardReviewStateRepository;
+  packages: IAsyncPackageRepository;
+  boardStates: IAsyncBoardReviewStateRepository;
   audit: AuditLogger;
   notifications: NotificationService;
 }
@@ -76,24 +76,24 @@ export class BoardService {
   //   List / detail
   // ─────────────────────────────────────────────────────────────────────────
 
-  listBoardQueue(): Array<{ pkg: EvaluationPackage; state: BoardReviewState }> {
-    return this.deps.boardStates
-      .findAll()
-      .map((state) => {
-        const pkg = this.deps.packages.findById(state.packageId);
-        return pkg ? { pkg, state } : null;
-      })
-      .filter((x): x is { pkg: EvaluationPackage; state: BoardReviewState } => x !== null);
+  async listBoardQueue(): Promise<Array<{ pkg: EvaluationPackage; state: BoardReviewState }>> {
+    const states = await this.deps.boardStates.findAll();
+    const items: Array<{ pkg: EvaluationPackage; state: BoardReviewState }> = [];
+    for (const state of states) {
+      const pkg = await this.deps.packages.findById(state.packageId);
+      if (pkg) items.push({ pkg, state });
+    }
+    return items;
   }
 
-  getBoardPackage(packageId: string): {
+  async getBoardPackage(packageId: string): Promise<{
     pkg: EvaluationPackage;
     state: BoardReviewState;
     hashCheck: HashCheckResult;
-  } {
-    const pkg = this.requirePackage(packageId);
-    const state = this.requireBoardState(packageId);
-    const hashCheck = this.checkHashIntegrity(packageId);
+  }> {
+    const pkg = await this.requirePackage(packageId);
+    const state = await this.requireBoardState(packageId);
+    const hashCheck = await this.checkHashIntegrity(packageId);
     return { pkg, state, hashCheck };
   }
 
@@ -108,7 +108,7 @@ export class BoardService {
    * before approval.
    */
   async checkIntibakCompleteness(packageId: string): Promise<IntibakCompletenessResult> {
-    const pkg = this.deps.packages.findById(packageId);
+    const pkg = await this.deps.packages.findById(packageId);
     if (!pkg) {
       return {
         packageId,
@@ -171,9 +171,9 @@ export class BoardService {
   //   702-HASH  —  Post-signature integrity check
   // ─────────────────────────────────────────────────────────────────────────
 
-  checkHashIntegrity(packageId: string): HashCheckResult {
-    const pkg = this.requirePackage(packageId);
-    const state = this.requireBoardState(packageId);
+  async checkHashIntegrity(packageId: string): Promise<HashCheckResult> {
+    const pkg = await this.requirePackage(packageId);
+    const state = await this.requireBoardState(packageId);
 
     // No dean signature yet → no integrity baseline to check against.
     if (!state.deanSignature) {
@@ -197,7 +197,7 @@ export class BoardService {
       state.hashLockedAt = new Date().toISOString();
       state.hashLockReason = `702-HASH mismatch. Signed: ${signedHash}. Current: ${currentHash}.`;
       state.lifecycle = "LOCKED_HASH_VIOLATION";
-      this.deps.boardStates.save(state);
+      await this.deps.boardStates.save(state);
       this.deps.audit.write({
         actorUserId: "SYSTEM",
         actorRole: UserRole.SystemAdmin,
@@ -224,9 +224,9 @@ export class BoardService {
    * current document state.  Use this after a sysadmin corrects the tampered
    * data and the Dean re-signs.
    */
-  clearHashLock(packageId: string, newToken: string, signatoryId: string): void {
-    const pkg = this.requirePackage(packageId);
-    const state = this.requireBoardState(packageId);
+  async clearHashLock(packageId: string, newToken: string, signatoryId: string): Promise<void> {
+    const pkg = await this.requirePackage(packageId);
+    const state = await this.requireBoardState(packageId);
 
     if (!state.hashLocked) {
       throw new ConflictError(
@@ -241,7 +241,7 @@ export class BoardService {
     state.hashLockedAt = null;
     state.hashLockReason = null;
     state.lifecycle = "PENDING_BOARD_REVIEW";
-    this.deps.boardStates.save(state);
+    await this.deps.boardStates.save(state);
 
     this.deps.audit.write({
       actorUserId: signatoryId,
@@ -279,7 +279,7 @@ export class BoardService {
   }
 
   async verifyDeanSignature(input: SignatureVerifyInput): Promise<SignatureVerifyResult> {
-    const pkg = this.deps.packages.findById(input.packageId);
+    const pkg = await this.deps.packages.findById(input.packageId);
     if (!pkg) {
       return this.signatureFailure(
         input.packageId,
@@ -317,7 +317,7 @@ export class BoardService {
     }
 
     // ── Valid: write the signature and the document hash snapshot ──────────
-    const state = this.requireBoardState(input.packageId);
+    const state = await this.requireBoardState(input.packageId);
     if (state.hashLocked) {
       throw new ConflictError(
         "HASH_LOCKED",
@@ -336,7 +336,7 @@ export class BoardService {
       documentHash,
     );
     state.lifecycle = "FORWARDED_TO_BOARD";
-    this.deps.boardStates.save(state);
+    await this.deps.boardStates.save(state);
 
     this.tokenRegistry.delete(input.token); // single-use
 
@@ -365,11 +365,11 @@ export class BoardService {
   // ─────────────────────────────────────────────────────────────────────────
 
   async boardDecide(input: BoardDecisionInput): Promise<BoardDecisionResult> {
-    const pkg = this.requirePackage(input.packageId);
-    const state = this.requireBoardState(input.packageId);
+    const pkg = await this.requirePackage(input.packageId);
+    const state = await this.requireBoardState(input.packageId);
 
     // ── Guard: hash integrity must hold ───────────────────────────────────
-    const hashCheck = this.checkHashIntegrity(input.packageId);
+    const hashCheck = await this.checkHashIntegrity(input.packageId);
     if (!hashCheck.isMatch) {
       throw new ConflictError(
         "702-HASH",
@@ -419,8 +419,8 @@ export class BoardService {
    * announcement.  See TC-7A Step 4.
    */
   async confirmForPublication(input: ConfirmForPublicationInput): Promise<ConfirmForPublicationResult> {
-    const pkg = this.requirePackage(input.packageId);
-    const state = this.requireBoardState(input.packageId);
+    const pkg = await this.requirePackage(input.packageId);
+    const state = await this.requireBoardState(input.packageId);
 
     if (state.lifecycle !== "APPROVED_BY_BOARD") {
       throw new ConflictError(
@@ -431,7 +431,7 @@ export class BoardService {
 
     const now = new Date().toISOString();
     state.lifecycle = "READY_FOR_PUBLICATION";
-    this.deps.boardStates.save(state);
+    await this.deps.boardStates.save(state);
 
     for (const appId of [...pkg.asilApplicationIds, ...pkg.yedekApplicationIds]) {
       const app = await this.deps.applications.findById(appId);
@@ -469,9 +469,9 @@ export class BoardService {
    * fix, stores the clarification note on the board state for UI display, and
    * decouples the YGK Chair notification (same pattern as 571-NOTIFY).
    */
-  returnToYgkForClarification(input: ReturnForClarificationInput): ReturnForClarificationResult {
-    const pkg = this.requirePackage(input.packageId);
-    const state = this.requireBoardState(input.packageId);
+  async returnToYgkForClarification(input: ReturnForClarificationInput): Promise<ReturnForClarificationResult> {
+    const pkg = await this.requirePackage(input.packageId);
+    const state = await this.requireBoardState(input.packageId);
 
     if (!input.note?.trim()) {
       throw new ValidationError(
@@ -490,11 +490,11 @@ export class BoardService {
 
     state.lifecycle = "WAITING_FOR_CLARIFICATION_YGK";
     state.clarificationNote = note;
-    this.deps.boardStates.save(state);
+    await this.deps.boardStates.save(state);
 
     // Allow YGK to re-send after fixing.
     pkg.status = PackageStatus.Draft;
-    this.deps.packages.save(pkg);
+    await this.deps.packages.save(pkg);
 
     const ygkNotif = this.dispatchDecoupled(state, {
       recipientUserId: "YGK_CHAIR",
@@ -541,11 +541,11 @@ export class BoardService {
       loopbackTarget: null,
     };
     state.lifecycle = "APPROVED_BY_BOARD";
-    this.deps.boardStates.save(state);
+    await this.deps.boardStates.save(state);
 
     // Propagate to EvaluationPackage status.
     pkg.status = PackageStatus.ApprovedFacultyBoard;
-    this.deps.packages.save(pkg);
+    await this.deps.packages.save(pkg);
 
     // Propagate to each underlying application.
     const propagation: StatePropagationEvent[] = [
@@ -617,11 +617,11 @@ export class BoardService {
       loopbackTarget: target,
     };
     state.lifecycle = "REJECTED_BY_BOARD";
-    this.deps.boardStates.save(state);
+    await this.deps.boardStates.save(state);
 
     // Return the package to the YGK side.
     pkg.status = PackageStatus.Returned;
-    this.deps.packages.save(pkg);
+    await this.deps.packages.save(pkg);
 
     // Loop applications back to the appropriate review status.
     const appBackStatus = loopbackToApplicationStatus(target);
@@ -699,8 +699,8 @@ export class BoardService {
   // ─────────────────────────────────────────────────────────────────────────
 
   async publish(input: PublishInput): Promise<PublishResult> {
-    const pkg = this.requirePackage(input.packageId);
-    const state = this.requireBoardState(input.packageId);
+    const pkg = await this.requirePackage(input.packageId);
+    const state = await this.requireBoardState(input.packageId);
 
     if (state.lifecycle !== "READY_FOR_PUBLICATION") {
       throw new ConflictError(
@@ -713,7 +713,7 @@ export class BoardService {
     const publishedAt = new Date().toISOString();
     state.publishedAt = publishedAt;
     state.lifecycle = "PUBLISHED";
-    this.deps.boardStates.save(state);
+    await this.deps.boardStates.save(state);
 
     for (const appId of [...pkg.asilApplicationIds, ...pkg.yedekApplicationIds]) {
       const app = await this.deps.applications.findById(appId);
@@ -760,7 +760,7 @@ export class BoardService {
       if (stub.status === "failed") anyFailed = true;
     }
 
-    this.deps.boardStates.save(state); // persist notification stubs
+    await this.deps.boardStates.save(state); // persist notification stubs
 
     return {
       packageId: pkg.packageId,
@@ -871,14 +871,14 @@ export class BoardService {
     };
   }
 
-  private requirePackage(packageId: string): EvaluationPackage {
-    const pkg = this.deps.packages.findById(packageId);
+  private async requirePackage(packageId: string): Promise<EvaluationPackage> {
+    const pkg = await this.deps.packages.findById(packageId);
     if (!pkg) throw new NotFoundError(`Paket bulunamadı: ${packageId}`);
     return pkg;
   }
 
-  private requireBoardState(packageId: string): BoardReviewState {
-    const state = this.deps.boardStates.findById(packageId);
+  private async requireBoardState(packageId: string): Promise<BoardReviewState> {
+    const state = await this.deps.boardStates.findById(packageId);
     if (!state) {
       throw new NotFoundError(
         `Paket için Kurul inceleme kaydı bulunamadı: ${packageId}. ` +
