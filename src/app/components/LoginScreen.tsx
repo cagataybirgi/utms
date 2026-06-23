@@ -17,6 +17,48 @@ interface LoginScreenProps {
 
 type Screen = 'login' | 'forgot' | 'reset' | 'register';
 
+interface DemoStaff {
+  role: string;
+  tckn: string;
+  password: string;
+}
+
+interface DemoStudent {
+  name: string;
+  tckn: string;
+  password: string;
+  note?: string;
+}
+
+// Mirrors backend/src/mocks/seed-data.ts (buildSeedUsers + SEED_PASSWORDS).
+// Ranking/intibak students share the fallback password 'Ogrenci123!'.
+const DEMO_STAFF: DemoStaff[] = [
+  { role: 'ÖİDB', tckn: '11111111111', password: 'oidb123' },
+  { role: 'YDYO', tckn: '55555555555', password: 'ydyo123' },
+  { role: 'YGK Üyesi', tckn: '22222222222', password: 'ygk123' },
+  { role: 'YGK Başkanı', tckn: '33333333333', password: 'ygkchair123' },
+  { role: 'Dekanlık', tckn: '44444444444', password: 'dean123' },
+  { role: 'Fakülte Kurulu', tckn: '66666666666', password: 'board123' },
+  { role: 'Admin', tckn: '99999999999', password: 'admin123' },
+];
+
+const DEMO_STUDENTS: DemoStudent[] = [
+  { name: 'Ahmet Yılmaz', tckn: '12345678901', password: 'ValidPass1!', note: 'GNO 3.45' },
+  { name: 'Zeynep Yılmaz', tckn: '11223344556', password: 'ValidPass1!', note: 'GNO 2.0' },
+  { name: 'Ahmet Kaya', tckn: '20190501034', password: 'Ogrenci123!' },
+  { name: 'Barış Tan', tckn: '20190501035', password: 'Ogrenci123!' },
+  { name: 'Ela Öz', tckn: '20190501036', password: 'Ogrenci123!' },
+  { name: 'Zeynep Demir', tckn: '20190501042', password: 'Ogrenci123!' },
+  { name: 'Can Aydın', tckn: '20190501050', password: 'Ogrenci123!' },
+  { name: 'Berk Yılmaz', tckn: '20190501055', password: 'Ogrenci123!' },
+  { name: 'Duru Çelik', tckn: '20190501061', password: 'Ogrenci123!' },
+  { name: 'Sude Arslan', tckn: '20190501070', password: 'Ogrenci123!' },
+  { name: 'Mert Koç', tckn: '20190501078', password: 'Ogrenci123!' },
+  { name: 'Selin Aksoy', tckn: '20190501088', password: 'Ogrenci123!' },
+  { name: 'Cem Polat', tckn: '20190501091', password: 'Ogrenci123!' },
+  { name: 'Elif Yıldız', tckn: '20190501099', password: 'Ogrenci123!' },
+];
+
 export function LoginScreen({ onLogin, initialResetToken }: LoginScreenProps) {
   const [tckn, setTckn] = useState('');
   const [password, setPassword] = useState('');
@@ -55,6 +97,12 @@ export function LoginScreen({ onLogin, initialResetToken }: LoginScreenProps) {
   }, [lockoutUntil]);
 
   const isLocked = !!lockoutUntil && Date.now() < lockoutUntil;
+
+  const fillCredentials = (demoTckn: string, demoPassword: string) => {
+    setTckn(demoTckn);
+    setPassword(demoPassword);
+    setError('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,15 +282,38 @@ export function LoginScreen({ onLogin, initialResetToken }: LoginScreenProps) {
           {/* Demo Credentials */}
           <div className="mt-8 pt-6 border-t border-gray-100">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 text-center">Demo Giriş Bilgileri</p>
+
+            <p className="text-[10px] font-bold text-gray-500 mb-2">Personel Hesapları</p>
             <div className="grid grid-cols-2 gap-2 text-[10px] font-medium text-gray-500">
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Öğrenci: <span className="text-gray-900">12345678901</span></span><span>Şifre: <span className="text-gray-900">ValidPass1!</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>ÖİDB: <span className="text-gray-900">11111111111</span></span><span>Şifre: <span className="text-gray-900">oidb123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YDYO: <span className="text-gray-900">55555555555</span></span><span>Şifre: <span className="text-gray-900">ydyo123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YGK: <span className="text-gray-900">22222222222</span></span><span>Şifre: <span className="text-gray-900">ygk123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>YGK Başkanı: <span className="text-gray-900">33333333333</span></span><span>Şifre: <span className="text-gray-900">ygkchair123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Dekanlık: <span className="text-gray-900">44444444444</span></span><span>Şifre: <span className="text-gray-900">dean123</span></span></div>
-              <div className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col"><span>Admin: <span className="text-gray-900">99999999999</span></span><span>Şifre: <span className="text-gray-900">admin123</span></span></div>
+              {DEMO_STAFF.map((acc) => (
+                <button
+                  key={acc.tckn}
+                  type="button"
+                  onClick={() => fillCredentials(acc.tckn, acc.password)}
+                  className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col text-left hover:border-[#C00000]/40 hover:bg-red-50/40 transition-colors"
+                >
+                  <span>{acc.role}: <span className="text-gray-900">{acc.tckn}</span></span>
+                  <span>Şifre: <span className="text-gray-900">{acc.password}</span></span>
+                </button>
+              ))}
             </div>
+
+            <p className="text-[10px] font-bold text-gray-500 mt-4 mb-2">Öğrenci Hesapları</p>
+            <div className="grid grid-cols-2 gap-2 text-[10px] font-medium text-gray-500 max-h-44 overflow-y-auto pr-1">
+              {DEMO_STUDENTS.map((acc) => (
+                <button
+                  key={acc.tckn}
+                  type="button"
+                  onClick={() => fillCredentials(acc.tckn, acc.password)}
+                  className="bg-gray-50 p-2 rounded border border-gray-100 flex flex-col text-left hover:border-[#C00000]/40 hover:bg-red-50/40 transition-colors"
+                >
+                  <span className="text-gray-700">{acc.name}{acc.note ? <span className="text-gray-400"> ({acc.note})</span> : null}</span>
+                  <span>TCKN: <span className="text-gray-900">{acc.tckn}</span></span>
+                  <span>Şifre: <span className="text-gray-900">{acc.password}</span></span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[9px] text-gray-400 mt-2 text-center">Hızlı doldurmak için bir hesaba tıklayın</p>
           </div>
         </div>
 
