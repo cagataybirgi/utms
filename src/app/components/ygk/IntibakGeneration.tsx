@@ -72,7 +72,14 @@ export function IntibakGeneration({ applicationId, studentName, readOnly = false
     })();
   }, [applicationId]);
 
-  const sourceRows = (dto?.mappings ?? []).filter((m) => m.sourceCourseCodes.length > 0);
+  // One row per previous course. A freshly added manual course (6E) has no
+  // mapping entry yet → show it as a PENDING row so it is visible immediately.
+  const sourceRows: MappingEntry[] = (dto?.previousCourses ?? []).map((pc) => {
+    const m = (dto?.mappings ?? []).find(
+      (mm) => mm.sourceCourseCodes.length === 1 && mm.sourceCourseCodes[0] === pc.code,
+    );
+    return m ?? { entryId: '', sourceCourseCodes: [pc.code], targetCourseCode: null, status: 'PENDING_REVIEW' };
+  });
   const coveredTargets = new Set(
     (dto?.mappings ?? [])
       .filter((m) => ['SUGGESTED_MATCH', 'APPROVED', 'MANUAL_OVERRIDE', 'NO_PREVIOUS_EQUIVALENT'].includes(m.status) && m.targetCourseCode)
@@ -97,13 +104,18 @@ export function IntibakGeneration({ applicationId, studentName, readOnly = false
   };
 
   const onSelectTarget = (row: MappingEntry, value: string) => {
+    // Synthesized rows (manually added courses not yet in mappings) have no
+    // entryId; omit it so the backend matches/creates by sourceCourseCodes.
+    const base: MappingMutation = row.entryId
+      ? { entryId: row.entryId, sourceCourseCodes: row.sourceCourseCodes, targetCourseCode: null, status: 'PENDING_REVIEW' }
+      : { sourceCourseCodes: row.sourceCourseCodes, targetCourseCode: null, status: 'PENDING_REVIEW' };
     if (value === NOT_EXEMPT_VALUE) {
-      applyMutations([{ entryId: row.entryId, sourceCourseCodes: row.sourceCourseCodes, targetCourseCode: null, status: 'NOT_EXEMPT' }]);
+      applyMutations([{ ...base, targetCourseCode: null, status: 'NOT_EXEMPT' }]);
       return;
     }
     const suggested = suggestedMap[row.sourceCourseCodes.join(',')];
     const status: MappingStatus = value === suggested ? 'APPROVED' : 'MANUAL_OVERRIDE';
-    applyMutations([{ entryId: row.entryId, sourceCourseCodes: row.sourceCourseCodes, targetCourseCode: value, status }]);
+    applyMutations([{ ...base, targetCourseCode: value, status }]);
   };
 
   const approveAllSuggestions = () => {
@@ -238,7 +250,7 @@ export function IntibakGeneration({ applicationId, studentName, readOnly = false
             const badge = SOURCE_STATUS_BADGE[row.status];
             const selectValue = row.status === 'NOT_EXEMPT' ? NOT_EXEMPT_VALUE : row.targetCourseCode ?? undefined;
             return (
-              <div key={row.entryId} className="grid grid-cols-2 group">
+              <div key={row.entryId || row.sourceCourseCodes.join(',')} className="grid grid-cols-2 group">
                 <div className="p-4 border-r bg-white">
                   {row.sourceCourseCodes.map((code) => (
                     <div key={code} className="mb-1">

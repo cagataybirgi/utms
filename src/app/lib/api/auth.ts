@@ -54,10 +54,22 @@ export function mapBackendUser(b: BackendAuthUser): User {
   const parts = cleanName.split(/\s+/);
   const name = parts[0] ?? cleanName;
   const surname = parts.slice(1).join(' ') || '-';
-  const roles = Array.from(
-    new Set(b.roles.map((r) => ROLE_MAP[r]).filter((r): r is UserRole => Boolean(r))),
-  );
-  return { id: b.userId, tckn: b.tckn, name, surname, roles, email: b.email };
+  const roles = new Set<UserRole>();
+  for (const r of b.roles) {
+    const mapped = ROLE_MAP[r];
+    if (mapped) roles.add(mapped);
+  }
+  // SystemAdmin can switch into every panel for testing/oversight — backend RBAC
+  // already accepts SystemAdmin everywhere, so the UI mirrors that capability.
+  if (b.roles.includes('SYSTEM_ADMIN')) {
+    roles.add('Admin');
+    roles.add('Board');
+    roles.add('Dean');
+    roles.add('OIDB');
+    roles.add('YDYO');
+    roles.add('YGK');
+  }
+  return { id: b.userId, tckn: b.tckn, name, surname, roles: Array.from(roles), email: b.email };
 }
 
 export async function login(tckn: string, password: string): Promise<User> {

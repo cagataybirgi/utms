@@ -234,8 +234,13 @@ export class OidbService {
     const previous = application.currentStatus;
     application.routedToYdyo = !input.ydyoExempt;
     application.ydyoExempt = input.ydyoExempt;
-    application.routedToDeansOffice = true;
-    application.currentStatus = ApplicationStatus.PendingYgkForwarding;
+    if (input.ydyoExempt) {
+      application.routedToDeansOffice = true;
+      application.currentStatus = ApplicationStatus.PendingYgkForwarding;
+    } else {
+      application.routedToDeansOffice = false;
+      application.currentStatus = ApplicationStatus.InReviewYdyo;
+    }
     this.deps.applications.save(application);
     this.deps.audit.write({
       actorUserId,

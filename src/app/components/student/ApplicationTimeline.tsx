@@ -11,6 +11,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { getApplication, type ApplicationDetailDto, type StageLogDto } from '../../lib/api/document-upload';
+import { deptLabel, facultyLabel, transferLabel } from '../../lib/enums';
 
 interface ApplicationTimelineProps {
   applicationId: string;
@@ -278,40 +279,6 @@ function buildSteps(app: ApplicationDetailDto): TimelineStep[] {
 
 // ─── Display label maps ───────────────────────────────────────────────────────
 
-const DEPARTMENT_LABELS: Record<string, string> = {
-  // Values submitted by ApplicationForm
-  "computer-eng": "Bilgisayar Mühendisliği",
-  "electrical-eng": "Elektrik-Elektronik Mühendisliği",
-  "mechanical-eng": "Makine Mühendisliği",
-  "industrial-eng": "Endüstri Mühendisliği",
-  "civil-eng": "İnşaat Mühendisliği",
-  "architecture": "Mimarlık",
-  // Values used in seed / OIDB data
-  "dept-computer-engineering": "Bilgisayar Mühendisliği",
-  "dept-electrical-engineering": "Elektrik-Elektronik Mühendisliği",
-  "dept-mechanical-engineering": "Makine Mühendisliği",
-  "dept-architecture": "Mimarlık",
-  "dept-civil": "İnşaat Mühendisliği",
-};
-
-const FACULTY_LABELS: Record<string, string> = {
-  "faculty-engineering": "Mühendislik Fakültesi",
-  "faculty-architecture": "Mimarlık Fakültesi",
-};
-
-const TRANSFER_TYPE_LABELS: Record<string, string> = {
-  "KURUMLAR_ARASI": "Kurumlar Arası Yatay Geçiş",
-  "KURUM_ICI": "Kurum İçi Yatay Geçiş",
-  "DGS": "Dikey Geçiş (DGS)",
-  "HORIZONTAL": "Kurumlar Arası Yatay Geçiş",
-  "VERTICAL": "Dikey Geçiş",
-  // Seed data value
-  "Kurumlar Arasi Yatay Gecis": "Kurumlar Arası Yatay Geçiş",
-};
-
-function deptLabel(id: string) { return DEPARTMENT_LABELS[id] ?? id; }
-function facultyLabel(id: string) { return FACULTY_LABELS[id] ?? id; }
-function transferLabel(type: string) { return TRANSFER_TYPE_LABELS[type] ?? type; }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 

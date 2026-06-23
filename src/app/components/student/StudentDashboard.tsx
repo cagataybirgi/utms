@@ -19,6 +19,7 @@ import type { User } from '../../App';
 import { ApplicationForm, type ApplicationFormValues } from './ApplicationForm';
 import { DocumentUpload } from './DocumentUpload';
 import { createApplication, listApplications, cancelApplication, getActivePeriod, type ApplicationSummaryDto } from '../../lib/api/document-upload';
+import { DEPARTMENT_FACULTY, FacultyId, deptLabel, facultyLabel } from '../../lib/enums';
 
 const DRAFT_STORAGE_KEY = 'utms_application_draft';
 import { ApplicationTimeline } from './ApplicationTimeline';
@@ -78,11 +79,12 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
         if (draftApplicationId) {
           await cancelApplication(draftApplicationId, user.id).catch(() => {});
         }
+        const draftDeptId = data.targetProgram || 'DRAFT';
         const { applicationId } = await createApplication(user.id, {
           studentTckn: data.tckn ?? user.tckn,
           studentFullName: `${data.name ?? ''} ${data.surname ?? ''}`.trim() || user.name,
-          targetDepartmentId: data.targetProgram || 'DRAFT',
-          targetFacultyId: 'faculty-engineering',
+          targetDepartmentId: draftDeptId,
+          targetFacultyId: DEPARTMENT_FACULTY[draftDeptId] ?? FacultyId.Engineering,
           transferType: data.transferType || 'DRAFT',
           targetSemester: Number(data.targetSemester) || 0,
           submittedGpa: Number(data.gpa) || 0,
@@ -119,12 +121,13 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
         await cancelApplication(draftApplicationId, user.id).catch(() => {});
         setDraftApplicationId(null);
       }
+      const finalDeptId = data.targetProgram ?? 'unknown';
       const { applicationId } = await createApplication(user.id, {
         studentTckn: data.tckn ?? user.tckn,
         studentFullName: `${data.name ?? ''} ${data.surname ?? ''}`.trim() || user.name,
-        targetDepartmentId: data.targetProgram ?? 'unknown',
-        targetFacultyId: 'faculty-engineering',
-        transferType: data.transferType ?? 'HORIZONTAL',
+        targetDepartmentId: finalDeptId,
+        targetFacultyId: DEPARTMENT_FACULTY[finalDeptId] ?? FacultyId.Engineering,
+        transferType: data.transferType ?? 'KURUMLAR_ARASI',
         targetSemester: Number(data.targetSemester ?? 3),
         submittedGpa: Number(data.gpa ?? 0),
         submittedYksScore: data.osymScore ? Number(data.osymScore) : undefined,
@@ -431,8 +434,8 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
                       <tr key={app.applicationId} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="py-3 px-4 text-xs text-gray-500 font-mono">{app.applicationId.slice(0, 8)}…</td>
                         <td className="py-3 px-4">
-                          <div className="text-sm text-gray-900">{app.targetDepartmentId}</div>
-                          <div className="text-xs text-gray-500">{app.targetFacultyId}</div>
+                          <div className="text-sm text-gray-900">{deptLabel(app.targetDepartmentId)}</div>
+                          <div className="text-xs text-gray-500">{facultyLabel(app.targetFacultyId)}</div>
                         </td>
                         <td className="py-3 px-4">
                           <Badge className={statusConfig.className}>{statusConfig.label}</Badge>

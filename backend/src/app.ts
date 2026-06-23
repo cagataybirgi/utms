@@ -10,7 +10,9 @@ import { buildRankingRouter } from "./modules/ranking/ranking.routes";
 import { buildDeanRouter } from "./modules/dean/dean.routes";
 import { buildAuthRouter } from "./modules/auth/auth.routes";
 import { buildPeriodRouter } from "./modules/period/period.routes";
+import { buildBoardRouter } from "./modules/board/board.routes";
 import { buildProfileRouter } from "./modules/profile/profile.routes";
+import { buildYdyoRouter } from "./modules/ydyo/ydyo.routes";
 
 export interface CreateAppOptions {
   container?: AppContainer;
@@ -34,7 +36,7 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.use(express.json({ limit: "12mb" }));
 
   app.get("/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", scope: "Scenario 1 (Login) & Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 5 (Ranking) & Scenario 6 (Intibak)" });
+    res.json({ status: "ok", scope: "Scenario 1 (Login) & Scenario 3 (Document Upload) & Scenario 4 (OIDB) & Scenario 3.1 (YDYO) & Scenario 5 (Ranking) & Scenario 6 (Intibak)" });
   });
 
   // DEV-ONLY: reset in-memory state (auth locks, reset tokens, rate limits,
@@ -44,6 +46,17 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
     app.post("/api/dev/reset", (_req: Request, res: Response) => {
       resetContainer(container);
       res.json({ status: "ok", message: "In-memory state reset to seed baseline." });
+    });
+
+    // Test Case 1H — let QA simulate the e-mail provider being offline without
+    // any special privilege. POST { available: false } before a password-reset
+    // request to exercise the EMAIL_SERVICE_DOWN path, then { available: true }
+    // (or /api/dev/reset) to restore. This is the manual-test hook that was
+    // missing when TC-1H was reported as "could not be tested".
+    app.post("/api/dev/email-service", (req: Request, res: Response) => {
+      const available = req.body?.available !== false;
+      container.auth.setEmailServiceAvailable(available);
+      res.json({ status: "ok", emailServiceAvailable: available });
     });
   }
 
@@ -56,9 +69,11 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.use("/api/applications", auth, buildApplicationRouter());
   app.use("/api/documents", auth, buildDocumentUploadRouter());
   app.use("/api/oidb", auth, buildOidbRouter(container));
+  app.use("/api/ydyo", auth, buildYdyoRouter(container));
   app.use("/api/ranking", auth, buildRankingRouter(container));
   app.use("/api/dean", auth, buildDeanRouter(container));
   app.use("/api/ygk", auth, buildIntibakRouter(container));
+  app.use("/api/board", auth, buildBoardRouter(container));
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({ error: "NOT_FOUND" });

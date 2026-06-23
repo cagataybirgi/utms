@@ -7,11 +7,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Alert, AlertDescription } from '../ui/alert';
 import { AlertCircle, Save, ArrowRight, CheckCircle2, Loader2, ArrowLeft, Search } from 'lucide-react';
 import { toast } from 'sonner';
+import { DepartmentId, FacultyId, TransferType, DEPARTMENT_FACULTY } from '../../lib/enums';
 
 // ─── Mock external API responses ─────────────────────────────────────────────
 
-// Set to true to simulate API down scenario (Test Case 2D)
-const SIMULATE_API_DOWN = false;
+// Test Case 2D — simulate external API (YÖKSİS / ÖSYM) downtime.
+// Previously a hard-coded compile-time `false`, so the manual-entry fallback
+// could not be exercised on the deployed site without a rebuild (and severing
+// real internet does nothing, because these are client-side mocks). It is now
+// runtime-controllable: append `?apiDown=1` to the URL (or set localStorage
+// `UTMS_SIMULATE_API_DOWN=1`) to force the down path; `?apiDown=0` forces it off.
+const SIMULATE_API_DOWN: boolean = (() => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('apiDown') === '1') return true;
+    if (q.get('apiDown') === '0') return false;
+    return window.localStorage.getItem('UTMS_SIMULATE_API_DOWN') === '1';
+  } catch {
+    return false;
+  }
+})();
 
 const API_TIMEOUT_MS = 5000;
 
@@ -286,7 +302,11 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                 {identityStatus === 'verified' && (
                   <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />
                 )}
+                {fieldErrors.tckn && (
+                  <AlertCircle className="absolute right-3 top-2.5 h-4 w-4 text-red-500" />
+                )}
               </div>
+              {fieldErrors.tckn && <p className="text-xs text-red-600 font-medium">{fieldErrors.tckn}</p>}
               <p className="text-xs text-gray-500">Giriş yapan hesabın kimlik numarası kullanılmaktadır</p>
             </div>
             {identityStatus !== 'verified' && (
@@ -388,9 +408,14 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
           <div>
             <div className="flex items-center justify-between mb-4 border-b pb-2">
               <h2 className="text-gray-900">Mevcut Akademik Bilgiler</h2>
-              {identityStatus === 'verified' && (
+              {identityStatus === 'verified' && !gpaErr && (
                 <div className="flex items-center text-xs text-green-600 font-medium">
                   <CheckCircle2 className="w-3 h-3 mr-1" /> YÖKSİS Tarafından Doğrulandı
+                </div>
+              )}
+              {identityStatus === 'verified' && gpaErr && (
+                <div className="flex items-center text-xs text-red-600 font-medium">
+                  <AlertCircle className="w-3 h-3 mr-1" /> Uygunluk Kontrolü Başarısız — GNO Yetersiz
                 </div>
               )}
               {identityStatus === 'manual' && (
@@ -475,6 +500,14 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                 </div>
               </div>
             </div>
+            {gpaErr && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  {gpaErr}. Bu başvuru ön elemeyi geçemez ve gönderilemez.
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         )}
 
@@ -491,9 +524,9 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                     <SelectValue placeholder="Transfer türü seçiniz" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="KURUMLAR_ARASI">Kurumlar Arası Yatay Geçiş</SelectItem>
-                    <SelectItem value="KURUM_ICI">Kurum İçi Yatay Geçiş</SelectItem>
-                    <SelectItem value="DGS">Dikey Geçiş (DGS)</SelectItem>
+                    <SelectItem value={TransferType.KURUMLAR_ARASI}>Kurumlar Arası Yatay Geçiş</SelectItem>
+                    <SelectItem value={TransferType.KURUM_ICI}>Kurum İçi Yatay Geçiş</SelectItem>
+                    <SelectItem value={TransferType.DGS}>Dikey Geçiş (DGS)</SelectItem>
                   </SelectContent>
                 </Select>
                 {fieldErrors.transferType && <p className="text-xs text-red-600">{fieldErrors.transferType}</p>}
@@ -506,12 +539,12 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                     <SelectValue placeholder="Program seçiniz" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="computer-eng">Bilgisayar Mühendisliği</SelectItem>
-                    <SelectItem value="electrical-eng">Elektrik-Elektronik Mühendisliği</SelectItem>
-                    <SelectItem value="mechanical-eng">Makine Mühendisliği</SelectItem>
-                    <SelectItem value="industrial-eng">Endüstri Mühendisliği</SelectItem>
-                    <SelectItem value="civil-eng">İnşaat Mühendisliği</SelectItem>
-                    <SelectItem value="architecture">Mimarlık</SelectItem>
+                    <SelectItem value={DepartmentId.CMPE}>Bilgisayar Mühendisliği</SelectItem>
+                    <SelectItem value={DepartmentId.EE}>Elektrik-Elektronik Mühendisliği</SelectItem>
+                    <SelectItem value={DepartmentId.ME}>Makine Mühendisliği</SelectItem>
+                    <SelectItem value={DepartmentId.IE}>Endüstri Mühendisliği</SelectItem>
+                    <SelectItem value={DepartmentId.CE}>İnşaat Mühendisliği</SelectItem>
+                    <SelectItem value={DepartmentId.ARCH}>Mimarlık</SelectItem>
                   </SelectContent>
                 </Select>
                 {fieldErrors.targetProgram && <p className="text-xs text-red-600">{fieldErrors.targetProgram}</p>}
@@ -573,6 +606,7 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                     className={osymStatus === 'fetched' ? 'bg-gray-50' : ''}
                   />
                   {osymStatus === 'fetched' && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+                  {fieldErrors.osymScore && <AlertCircle className="absolute right-3 top-2.5 h-4 w-4 text-red-500" />}
                 </div>
                 {fieldErrors.osymScore && <p className="text-xs text-red-600">{fieldErrors.osymScore}</p>}
               </div>
