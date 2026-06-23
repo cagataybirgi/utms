@@ -5,31 +5,28 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Alert, AlertDescription } from '../ui/alert';
-import { AlertCircle, Save, ArrowRight, CheckCircle2, Loader2, ArrowLeft, Search } from 'lucide-react';
+import { AlertCircle, Save, ArrowRight, CheckCircle2, Loader2, ArrowLeft, Search, WifiOff, Wifi } from 'lucide-react';
 import { toast } from 'sonner';
 import { DepartmentId, FacultyId, TransferType, DEPARTMENT_FACULTY } from '../../lib/enums';
 
-// ─── Mock external API responses ─────────────────────────────────────────────
-
-// Test Case 2D — simulate external API (YÖKSİS / ÖSYM) downtime.
-// Previously a hard-coded compile-time `false`, so the manual-entry fallback
-// could not be exercised on the deployed site without a rebuild (and severing
-// real internet does nothing, because these are client-side mocks). It is now
-// runtime-controllable: append `?apiDown=1` to the URL (or set localStorage
-// `UTMS_SIMULATE_API_DOWN=1`) to force the down path; `?apiDown=0` forces it off.
-const SIMULATE_API_DOWN: boolean = (() => {
-  if (typeof window === 'undefined') return false;
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (q.get('apiDown') === '1') return true;
-    if (q.get('apiDown') === '0') return false;
-    return window.localStorage.getItem('UTMS_SIMULATE_API_DOWN') === '1';
-  } catch {
-    return false;
-  }
-})();
-
 const API_TIMEOUT_MS = 5000;
+
+function isApiDown(simulateDown: boolean): boolean {
+  return simulateDown || !navigator.onLine;
+}
+
+async function mockApiCall<T>(
+  successValue: T,
+  simulateDown: boolean,
+  fastDelayMs = 1200,
+): Promise<T | null> {
+  if (isApiDown(simulateDown)) return null;
+  const result = await Promise.race<'success' | 'timeout'>([
+    new Promise(res => setTimeout(() => res('timeout'), API_TIMEOUT_MS)),
+    new Promise(res => setTimeout(() => res('success'), fastDelayMs)),
+  ]);
+  return result === 'success' ? successValue : null;
+}
 
 interface NviYoksisData {
   name: string; surname: string; birthDate: string;
@@ -79,19 +76,6 @@ const MOCK_OSYM: Record<string, Record<string, string>> = {
   '12345678901': { '2024': '485.50000', '2023': '472.30000', '2022': '468.12300' },
   '11223344556': { '2024': '485.50000' },
 };
-
-async function mockApiCall<T>(
-  successValue: T,
-  fastDelayMs = 1200,
-): Promise<T | null> {
-  const result = await Promise.race<'success' | 'timeout'>([
-    new Promise(res => setTimeout(() => res('timeout'), API_TIMEOUT_MS)),
-    SIMULATE_API_DOWN
-      ? new Promise<never>(() => {})
-      : new Promise(res => setTimeout(() => res('success'), fastDelayMs)),
-  ]);
-  return result === 'success' ? successValue : null;
-}
 
 // ─── Form types ───────────────────────────────────────────────────────────────
 
@@ -144,6 +128,7 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
   const [osymWarning, setOsymWarning] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [prescreenError, setPrescreenError] = useState<string | null>(null);
+  const [simulateApiDown, setSimulateApiDown] = useState(false);
 
   const updateField = (field: keyof ApplicationFormValues, value: string | boolean) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -166,10 +151,10 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
     // Check multiple enrollment first
     const multiEnroll = MOCK_MULTIPLE_ENROLLMENT[form.tckn];
     if (multiEnroll) {
-      const result = await mockApiCall(multiEnroll);
+      const result = await mockApiCall(multiEnroll, simulateApiDown);
       if (result === null) {
         setIdentityStatus('manual');
-        setIdentityWarning('Sistem arızası. Elle giriş yapabilirsiniz.');
+        setIdentityWarning('NVI/YÖKSİS servisine ulaşılamadı. Sistem arızası. Bilgilerinizi elle girebilirsiniz.');
       } else {
         setMultiplePrograms(result.programs);
         setIdentityStatus('idle'); // Wait for program selection
@@ -178,11 +163,17 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
     }
 
     const mockData = MOCK_NVI_YOKSIS[form.tckn] ?? null;
-    const result = await mockApiCall(mockData);
+    const result = await mockApiCall(mockData, simulateApiDown);
 
     if (result === null || !result) {
       setIdentityStatus('manual');
-      setIdentityWarning('Sistem arızası. Elle giriş yapabilirsiniz.');
+      setIdentityWarning(
+        simulateApiDown
+          ? 'NVI/YÖKSİS servisine ulaşılamadı. Sistem arızası (simüle edildi). Bilgilerinizi elle girebilirsiniz.'
+          : navigator.onLine
+            ? 'NVI/YÖKSİS servisine ulaşılamadı. Sistem arızası. Bilgilerinizi elle girebilirsiniz.'
+            : 'İnternet bağlantısı bulunamadı. NVI/YÖKSİS servisine erişilemiyor. Bilgilerinizi elle girebilirsiniz.',
+      );
     } else {
       setForm(prev => ({ ...prev, ...result }));
       setIdentityStatus('verified');
@@ -200,12 +191,16 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
 
     const yearScores = MOCK_OSYM[form.tckn];
     const score = yearScores?.[year] ?? null;
-    const result = await mockApiCall(score, 1000);
+    const result = await mockApiCall(score, simulateApiDown, 1000);
 
     if (result === null) {
       setOsymStatus('manual');
       setOsymWarning(
-        'ÖSYM servisi yanıt vermedi. Sistem arızası. Elle giriş yapabilirsiniz. Manuel girilen puanlar, ÖİDB incelemesinde belge doğrulamasına tabi tutulacaktır.',
+        simulateApiDown
+          ? 'ÖSYM servisi yanıt vermedi. Sistem arızası (simüle edildi). Puanınızı elle girebilirsiniz. Manuel girilen puanlar, ÖİDB incelemesinde belge doğrulamasına tabi tutulacaktır.'
+          : navigator.onLine
+            ? 'ÖSYM servisi yanıt vermedi. Sistem arızası. Puanınızı elle girebilirsiniz. Manuel girilen puanlar, ÖİDB incelemesinde belge doğrulamasına tabi tutulacaktır.'
+            : 'İnternet bağlantısı bulunamadı. ÖSYM servisine erişilemiyor. Puanınızı elle girebilirsiniz. Manuel girilen puanlar, ÖİDB incelemesinde belge doğrulamasına tabi tutulacaktır.',
       );
     } else {
       setForm(prev => ({ ...prev, osymScore: result, osymYear: year }));
@@ -279,9 +274,35 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-gray-900 mb-2">Yeni Transfer Başvurusu Oluştur</h1>
-        <p className="text-gray-600">Başvuru sürecini başlatmak için T.C. Kimlik Numaranızı doğrulayınız</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-gray-900 mb-2">Yeni Transfer Başvurusu Oluştur</h1>
+          <p className="text-gray-600">Başvuru sürecini başlatmak için T.C. Kimlik Numaranızı doğrulayınız</p>
+        </div>
+        {/* TC 2D — API Down simulation toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = !simulateApiDown;
+            setSimulateApiDown(next);
+            toast(next ? 'API arızası simülasyonu açıldı' : 'API arızası simülasyonu kapatıldı', {
+              description: next
+                ? 'NVI/YÖKSİS ve ÖSYM çağrıları başarısız dönecek'
+                : 'API çağrıları normal çalışacak',
+            });
+          }}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+            simulateApiDown
+              ? 'bg-red-50 border-red-300 text-red-700 hover:bg-red-100'
+              : 'bg-gray-50 border-gray-300 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          {simulateApiDown ? (
+            <><WifiOff className="w-3.5 h-3.5" /> API Arızası: AÇIK</>
+          ) : (
+            <><Wifi className="w-3.5 h-3.5" /> API Arızası: KAPALI</>
+          )}
+        </button>
       </div>
 
       <Card className="p-6 space-y-6">
@@ -487,18 +508,39 @@ export function ApplicationForm({ onSave, onCancel, draftData, userTckn }: Appli
                 </div>
               </div>
               {/* Language */}
-              <div className="space-y-2">
-                <Label>Eğitim Dili</Label>
-                <div className="relative">
-                  <Input
-                    value={form.languagePercentage ? `%${form.languagePercentage} ${form.languageLabel}` : ''}
-                    readOnly
-                    className="bg-gray-50"
-                    onChange={() => {}}
-                  />
-                  {fieldReadOnly && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />}
+              {fieldReadOnly ? (
+                <div className="space-y-2">
+                  <Label>Eğitim Dili</Label>
+                  <div className="relative">
+                    <Input
+                      value={form.languagePercentage ? `%${form.languagePercentage} ${form.languageLabel}` : ''}
+                      readOnly
+                      className="bg-gray-50"
+                      onChange={() => {}}
+                    />
+                    <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-600" />
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>Eğitim Dili Yüzdesi (%)</Label>
+                    <Input
+                      value={form.languagePercentage}
+                      onChange={e => updateField('languagePercentage', e.target.value)}
+                      placeholder="ör. 100"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Eğitim Dili</Label>
+                    <Input
+                      value={form.languageLabel}
+                      onChange={e => updateField('languageLabel', e.target.value)}
+                      placeholder="ör. İngilizce"
+                    />
+                  </div>
+                </>
+              )}
             </div>
             {gpaErr && (
               <Alert variant="destructive" className="mt-4">
