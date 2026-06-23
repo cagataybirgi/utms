@@ -87,20 +87,6 @@ export class ApplicationService {
   }
 
   async create(studentId: string, dto: CreateApplicationDto): Promise<{ applicationId: string }> {
-    // Duplicate check: block if student already has an active (non-draft) application for this period
-    if (!dto.isDraft) {
-      const existing = await prisma.application.findFirst({
-        where: {
-          studentId,
-          periodId: dto.periodId,
-          currentStatus: { not: "DRAFT" },
-        },
-      });
-      if (existing) {
-        throw new Error(`Bu dönem için zaten aktif bir başvurunuz bulunmaktadır. Başvuru ID: ${existing.applicationId}`);
-      }
-    }
-
     const application = await prisma.application.create({
       data: {
         studentId,

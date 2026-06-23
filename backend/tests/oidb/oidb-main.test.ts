@@ -31,9 +31,9 @@ describe("Test Case 4 (Main): OIDB-Main — successful verify and forward", () =
       .post(`/api/oidb/applications/${targetId}/forward`)
       .send({ ydyoExempt: false });
     expect(forwardRes.status).toBe(200);
-    expect(forwardRes.body.application.currentStatus).toBe(ApplicationStatus.PendingYgkForwarding);
+    expect(forwardRes.body.application.currentStatus).toBe(ApplicationStatus.InReviewYdyo);
     expect(forwardRes.body.application.routedToYdyo).toBe(true);
-    expect(forwardRes.body.application.routedToDeansOffice).toBe(true);
+    expect(forwardRes.body.application.routedToDeansOffice).toBe(false);
 
     const audit = kit.container.audit.findByEntity("Application", targetId);
     expect(audit.find((e) => e.actionType === "OIDB_VERIFY")).toBeDefined();

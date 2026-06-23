@@ -262,7 +262,7 @@ export class RankingService {
       activeSemester: app.finishedSemester,
       targetSemester: app.targetSemester,
       preScreening: app.preScreening,
-      ydyoDecision: app.ydyoExempt ? "EXEMPT" : "REQUIRED",
+      ydyoDecision: app.ydyoDecision ?? (app.ydyoExempt ? "EXEMPT" : "PENDING"),
       language: app.language,
       eligible: eligibility.eligible,
       warnings,

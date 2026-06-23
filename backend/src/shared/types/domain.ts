@@ -92,11 +92,28 @@ export interface Application {
   routedToYdyo: boolean;
   routedToDeansOffice: boolean;
   ydyoExempt: boolean;
+  languageProof?: LanguageProofInfo;
+  ydyoDecision?: LanguageDecision;
+  ydyoReviewNotes?: string;
+  ydyoReviewedBy?: string;
+  ydyoReviewedAt?: string;
   rankingCategory?: RankingCategory;
   transferScore?: number;
   intibakTableId?: string;
   submittedAt: string;
   lastModifiedAt: string;
+}
+
+export type LanguageExamType = "TOEFL_IBT" | "IELTS" | "YDS";
+
+export type LanguageDecision = "SUCCESSFUL" | "UNSUCCESSFUL" | "EXEMPT";
+
+export interface LanguageProofInfo {
+  examType: LanguageExamType;
+  score: number;
+  examDate: string;
+  validUntil: string;
+  certificateNumber: string;
 }
 
 export interface CorrectionReason {

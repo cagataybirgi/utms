@@ -1,65 +1,188 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
 import { Label } from '../ui/label';
 import { Checkbox } from '../ui/checkbox';
-import { 
+import {
   ArrowLeft,
   CheckCircle2,
   XCircle,
-  Download,
-  FileText,
   AlertTriangle,
-  Send
+  Send,
+  ShieldCheck,
+  ShieldAlert,
+  Loader2,
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '../ui/dialog';
 import { Alert, AlertDescription } from '../ui/alert';
-import { CommentsPanel } from '../shared/CommentsPanel';
 import { toast } from 'sonner';
+import {
+  BoardApiError,
+  BoardPackageDetail,
+  DEPARTMENT_LABELS,
+  PERIOD_LABELS,
+  approveDecision,
+  confirmForPublication,
+  getDetail,
+  lifecycleDisplay,
+  publish,
+  rejectDecision,
+} from '../../lib/api/board';
 
 interface PackageReviewProps {
   packageId: string;
   onBack: () => void;
 }
 
-const MOCK_PACKAGE = {
-  id: 'PKG-2025-CE-001',
-  department: 'Bilgisayar Mühendisliği',
-  semester: '3. Dönem',
-  receivedDate: '18/01/2025',
-  meetingDate: '25/01/2025',
-  deansNotes: 'İdari inceleme tamamlanmıştır. Tüm belgeler usulüne uygundur. YGK değerlendirmesi titizlikle yapılmış ve gerekçelendirilmiştir. Onaylanması tavsiye olunur.',
-  summary: {
-    asilCount: 8,
-    yedekCount: 4,
-    quota: 8
-  }
-};
-
 export function PackageReview({ packageId, onBack }: PackageReviewProps) {
+  const [detail, setDetail] = useState<BoardPackageDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [boardNotes, setBoardNotes] = useState('');
   const [confirmedReview, setConfirmedReview] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleApprove = () => {
-    if (boardNotes.trim() && confirmedReview) {
-      toast.success('Paket başarıyla onaylandı. Sonuçlar 24 saat içinde ilan edilecektir.');
+  const fetchDetail = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getDetail(packageId);
+      setDetail(res);
+    } catch (e) {
+      const msg = e instanceof BoardApiError ? e.message : 'Paket detayı alınamadı.';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [packageId]);
+
+  useEffect(() => {
+    void fetchDetail();
+  }, [fetchDetail]);
+
+  const handleApprove = async () => {
+    if (!boardNotes.trim() || !confirmedReview) return;
+    setSubmitting(true);
+    try {
+      await approveDecision(packageId, boardNotes.trim());
+      toast.success('Paket başarıyla onaylandı. Yayın onayı için bir sonraki adıma geçebilirsiniz.');
       setShowApproveModal(false);
-      onBack();
+      setBoardNotes('');
+      setConfirmedReview(false);
+      await fetchDetail();
+    } catch (e) {
+      const msg = e instanceof BoardApiError ? e.message : 'Onay başarısız.';
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleReject = () => {
-    if (rejectionReason.trim()) {
-      toast.error('Paket reddedildi ve revizyon için iade edildi');
+  const handleReject = async () => {
+    if (!rejectionReason.trim()) return;
+    setSubmitting(true);
+    try {
+      await rejectDecision(
+        packageId,
+        'Fakülte Yönetim Kurulu reddi.',
+        rejectionReason.trim(),
+        'ygk',
+      );
+      toast.success('Paket reddedildi ve YGK\'ya iade edildi.');
       setShowRejectModal(false);
-      onBack();
+      setRejectionReason('');
+      await fetchDetail();
+    } catch (e) {
+      const msg = e instanceof BoardApiError ? e.message : 'Red işlemi başarısız.';
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  const handleConfirmForPublication = async () => {
+    setSubmitting(true);
+    try {
+      await confirmForPublication(packageId);
+      toast.success('Sonuçlar ÖİDB\'ye iletildi (Yayına Hazır).');
+      await fetchDetail();
+    } catch (e) {
+      const msg = e instanceof BoardApiError ? e.message : 'Yayın onayı başarısız.';
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handlePublish = async () => {
+    setSubmitting(true);
+    try {
+      const res = await publish(packageId);
+      if (res.hasNotifyErrors) {
+        toast.warning(res.message);
+      } else {
+        toast.success(res.message);
+      }
+      await fetchDetail();
+    } catch (e) {
+      const msg = e instanceof BoardApiError ? e.message : 'Yayınlama başarısız.';
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading && !detail) {
+    return (
+      <div className="flex items-center justify-center py-16 text-gray-500">
+        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+        Paket yükleniyor...
+      </div>
+    );
+  }
+
+  if (error || !detail) {
+    return (
+      <Card className="p-6">
+        <div className="text-red-700">
+          {error ?? 'Paket bulunamadı.'} —{' '}
+          <button className="underline" onClick={() => void fetchDetail()}>
+            tekrar dene
+          </button>
+        </div>
+        <div className="mt-4">
+          <Button variant="outline" onClick={onBack}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Paketlere Dön
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  const { pkg, state, hashCheck } = detail;
+  const display = lifecycleDisplay(state.lifecycle);
+  const dept = DEPARTMENT_LABELS[pkg.departmentId] ?? pkg.departmentId;
+  const period = PERIOD_LABELS[pkg.periodId] ?? pkg.periodId;
+
+  const canApproveReject =
+    state.lifecycle === 'FORWARDED_TO_BOARD' ||
+    state.lifecycle === 'PENDING_BOARD_REVIEW';
+  const canConfirmForPublication = state.lifecycle === 'APPROVED_BY_BOARD';
+  const canPublish = state.lifecycle === 'READY_FOR_PUBLICATION';
 
   return (
     <div className="space-y-6">
@@ -67,7 +190,9 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-gray-900 mb-2 font-bold">Fakülte Kurulu - Paket İncelemesi</h1>
-          <p className="text-gray-600 font-medium">{MOCK_PACKAGE.id} - {MOCK_PACKAGE.department}</p>
+          <p className="text-gray-600 font-medium font-mono text-sm">
+            {pkg.packageId} — {dept}
+          </p>
         </div>
         <Button variant="outline" onClick={onBack}>
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -75,167 +200,200 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
         </Button>
       </div>
 
-      {/* Meeting Info Banner */}
+      {/* Lifecycle status alert */}
       <Alert>
         <AlertTriangle className="h-4 w-4" />
         <AlertDescription className="font-medium">
-          <strong>Fakülte Yönetim Kurulu:</strong> Bu paket {MOCK_PACKAGE.meetingDate} tarihli kurul toplantısında görüşülmek üzere gündeme alınmıştır.
-          Tüm kurul üyelerinin toplantı öncesi incelemesi zorunludur.
+          <strong>Durum:</strong> {display.label}
+          {state.deanSignature && (
+            <span className="ml-3 text-xs text-gray-600">
+              · Dekan imzası: {new Date(state.deanSignature.issuedAt).toLocaleString('tr-TR')}
+            </span>
+          )}
         </AlertDescription>
       </Alert>
+
+      {/* Hash integrity panel */}
+      <Card
+        className={`p-4 ${
+          hashCheck.isMatch
+            ? 'bg-green-50 border-green-200'
+            : 'bg-red-50 border-red-200'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          {hashCheck.isMatch ? (
+            <ShieldCheck className="w-5 h-5 text-green-700 mt-0.5" />
+          ) : (
+            <ShieldAlert className="w-5 h-5 text-red-700 mt-0.5" />
+          )}
+          <div className="flex-1">
+            <div
+              className={`text-sm font-bold ${
+                hashCheck.isMatch ? 'text-green-900' : 'text-red-900'
+              }`}
+            >
+              {hashCheck.isMatch
+                ? '702-HASH bütünlük kontrolü geçti.'
+                : '702-HASH ihlali — paket imza sonrası değiştirilmiş.'}
+            </div>
+            {state.deanSignature && (
+              <div className="text-xs text-gray-700 font-mono mt-1">
+                İmzalanan hash: {hashCheck.hashAtSignature.slice(0, 16)}… · Şu anki:{' '}
+                {hashCheck.currentHash.slice(0, 16)}…
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
 
       {/* Package Overview */}
       <Card className="p-6">
         <h2 className="text-gray-900 mb-4 font-bold">Paket Genel Bakış</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <div className="text-sm text-gray-500 mb-1">Bölüm</div>
-            <div className="text-gray-900 font-bold">{MOCK_PACKAGE.department}</div>
-          </div>
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <div className="text-sm text-gray-500 mb-1">Giriş Dönemi</div>
-            <div className="text-gray-900 font-bold">{MOCK_PACKAGE.semester}</div>
-          </div>
-          <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-            <div className="text-sm text-gray-500 mb-1">Asil Kontenjan</div>
-            <div className="text-2xl text-green-600 font-bold">{MOCK_PACKAGE.summary.asilCount}</div>
-          </div>
-          <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-            <div className="text-sm text-gray-500 mb-1">Yedek</div>
-            <div className="text-2xl text-yellow-600 font-bold">{MOCK_PACKAGE.summary.yedekCount}</div>
-          </div>
+          <OverviewCell label="Bölüm" value={dept} />
+          <OverviewCell label="Dönem" value={period} />
+          <OverviewCell
+            label="Asil"
+            value={String(pkg.asilApplicationIds.length)}
+            tone="green"
+          />
+          <OverviewCell
+            label="Yedek"
+            value={String(pkg.yedekApplicationIds.length)}
+            tone="yellow"
+          />
         </div>
 
-        <div className="pt-4 border-t border-gray-200">
-          <div className="text-sm text-gray-500 mb-2 font-bold uppercase tracking-wider">Dekanlık İnceleme Notu:</div>
-          <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 text-sm text-gray-900 leading-relaxed italic">
-            "{MOCK_PACKAGE.deansNotes}"
+        {state.boardDecision && (
+          <div className="pt-4 border-t border-gray-200">
+            <div className="text-sm text-gray-500 mb-2 font-bold uppercase tracking-wider">
+              Kurul Kararı:
+            </div>
+            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-sm text-gray-900 leading-relaxed">
+              <div className="mb-2">
+                <Badge
+                  className={
+                    state.boardDecision.approved
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-red-100 text-red-800'
+                  }
+                >
+                  {state.boardDecision.approved ? 'Onaylandı' : 'Reddedildi'}
+                </Badge>
+                <span className="ml-2 text-xs text-gray-500">
+                  {new Date(state.boardDecision.decidedAt).toLocaleString('tr-TR')}
+                </span>
+              </div>
+              <div className="italic">"{state.boardDecision.resolutionText}"</div>
+              {state.boardDecision.rejectionReason && (
+                <div className="mt-2 text-red-800">
+                  <strong>Red gerekçesi:</strong> {state.boardDecision.rejectionReason}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
+
+        {state.clarificationNote && (
+          <div className="pt-4 border-t border-gray-200 mt-4">
+            <div className="text-sm text-gray-500 mb-2 font-bold uppercase tracking-wider">
+              Dekanlık Açıklama Notu:
+            </div>
+            <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 text-sm text-gray-900 leading-relaxed italic">
+              "{state.clarificationNote}"
+            </div>
+          </div>
+        )}
       </Card>
-
-      {/* Review Checklist */}
-      <Card className="p-6">
-        <h2 className="text-gray-900 mb-4 font-bold">Kurul Kontrol Listesi</h2>
-        <div className="space-y-4">
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <div className="flex items-start space-x-3">
-              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />
-              <div className="flex-1">
-                <div className="text-sm text-gray-900 font-bold">YGK Değerlendirmesi Tamamlandı</div>
-                <div className="text-xs text-gray-600">Tüm adaylar belirlenen kriterlere göre puanlanmış ve sıralanmıştır.</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <div className="flex items-start space-x-3">
-              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />
-              <div className="flex-1">
-                <div className="text-sm text-gray-900 font-bold">Ders Muafiyet (İntibak) Tabloları Hazır</div>
-                <div className="text-xs text-gray-600">Asil listesindeki tüm öğrenciler için intibak formları düzenlenmiştir.</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <div className="flex items-start space-x-3">
-              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />
-              <div className="flex-1">
-                <div className="text-sm text-gray-900 font-bold">Kontenjan Uyumu</div>
-                <div className="text-xs text-gray-600">Önerilen aday sayıları ilan edilen bölüm kontenjanları ile uyumludur.</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <div className="flex items-start space-x-3">
-              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />
-              <div className="flex-1">
-                <div className="text-sm text-gray-900 font-bold">Dekanlık Onayı</div>
-                <div className="text-xs text-gray-600">İdari ve usul yönünden eksiklik olmadığı dekanlıkça teyit edilmiştir.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Review Documents */}
-      <Card className="p-6">
-        <h2 className="text-gray-900 mb-4 font-bold">İnceleme Belgeleri</h2>
-        <div className="space-y-2">
-          {[
-            'Nihai Sıralama Listesi (Asil & Yedek)',
-            'YGK Değerlendirme Raporları',
-            'Ders Muafiyet Tabloları (İntibak)',
-            'Dil Yeterlilik Doğrulama Özeti',
-            'Dekanlık İnceleme Notları',
-            'Destekleyici Belgeler ve Kanıtlar'
-          ].map((doc, index) => (
-            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
-              <div className="flex items-center space-x-3">
-                <FileText className="w-5 h-5 text-gray-500 group-hover:text-[#C00000]" />
-                <span className="text-sm text-gray-900 font-medium">{doc}</span>
-              </div>
-              <Button size="sm" variant="ghost" className="hover:bg-white">
-                <Download className="w-4 h-4 mr-2" />
-                İndir
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Comments Panel */}
-      <CommentsPanel 
-        applicationId={packageId}
-        currentUserRole="Fakülte Kurulu"
-      />
 
       {/* Board Decision Actions */}
       <Card className="p-6">
         <h2 className="text-gray-900 mb-4 font-bold">Kurul Kararı</h2>
-        <p className="text-sm text-gray-600 mb-6 font-medium">
-          Fakülte Yönetim Kurulu bu değerlendirme paketini onaylamalı veya reddetmelidir.
-          Onaylama işlemi, transfer kararlarını kesinleştirerek öğrencilere ilan edilmesini sağlar.
-        </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Button 
-            variant="outline"
-            className="h-auto py-4 flex flex-col items-center space-y-2 border-red-200 text-red-600 hover:bg-red-50"
-            onClick={() => setShowRejectModal(true)}
-          >
-            <XCircle className="w-6 h-6" />
-            <div className="text-center">
-              <div className="text-sm font-bold">Paketi Reddet</div>
-              <div className="text-xs">Revizyon için iade et</div>
-            </div>
-          </Button>
+        {canApproveReject && (
+          <>
+            <p className="text-sm text-gray-600 mb-6 font-medium">
+              Fakülte Yönetim Kurulu bu değerlendirme paketini onaylamalı veya
+              reddetmelidir.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Button
+                variant="outline"
+                className="h-auto py-4 flex flex-col items-center space-y-2 border-red-200 text-red-600 hover:bg-red-50"
+                onClick={() => setShowRejectModal(true)}
+                disabled={submitting}
+              >
+                <XCircle className="w-6 h-6" />
+                <div className="text-center">
+                  <div className="text-sm font-bold">Paketi Reddet</div>
+                  <div className="text-xs">YGK'ya iade et</div>
+                </div>
+              </Button>
 
-          <Button 
-            variant="outline"
-            className="h-auto py-4 flex flex-col items-center space-y-2 hover:bg-gray-50"
-          >
-            <Send className="w-6 h-6 text-gray-600" />
-            <div className="text-center">
-              <div className="text-sm font-bold">Ek Bilgi Talebi</div>
-              <div className="text-xs">Dekanlık/YGK'ya sor</div>
+              <Button
+                className="h-auto py-4 flex flex-col items-center space-y-2 shadow-lg shadow-red-100"
+                style={{ backgroundColor: '#5C1010' }}
+                onClick={() => setShowApproveModal(true)}
+                disabled={submitting}
+              >
+                <CheckCircle2 className="w-6 h-6" />
+                <div className="text-center">
+                  <div className="text-sm font-bold">Paketi Onayla</div>
+                  <div className="text-xs opacity-80">Kararları kesinleştir</div>
+                </div>
+              </Button>
             </div>
-          </Button>
+          </>
+        )}
 
-          <Button 
-            className="h-auto py-4 flex flex-col items-center space-y-2 shadow-lg shadow-red-100"
-            style={{ backgroundColor: '#5C1010' }}
-            onClick={() => setShowApproveModal(true)}
-          >
-            <CheckCircle2 className="w-6 h-6" />
-            <div className="text-center">
-              <div className="text-sm font-bold">Paketi Onayla</div>
-              <div className="text-xs opacity-80">Kararları kesinleştir</div>
-            </div>
-          </Button>
-        </div>
+        {canConfirmForPublication && (
+          <>
+            <p className="text-sm text-gray-600 mb-6 font-medium">
+              Paket Kurul tarafından onaylandı. Sonuçların öğrencilere ilan edilmesi
+              için ÖİDB'ye iletin.
+            </p>
+            <Button
+              className="w-full h-auto py-4 flex flex-col items-center space-y-2"
+              style={{ backgroundColor: '#5C1010' }}
+              onClick={() => void handleConfirmForPublication()}
+              disabled={submitting}
+            >
+              <Send className="w-6 h-6" />
+              <div className="text-center">
+                <div className="text-sm font-bold">Yayına Onayla (ÖİDB'ye Gönder)</div>
+                <div className="text-xs opacity-80">
+                  Lifecycle → READY_FOR_PUBLICATION
+                </div>
+              </div>
+            </Button>
+          </>
+        )}
+
+        {canPublish && (
+          <>
+            <p className="text-sm text-gray-600 mb-6 font-medium">
+              Paket ÖİDB'ye iletildi. Yayınlama aşaması ÖİDB officer'ı tarafından
+              yapılır (bu butonu test için kullanabilirsiniz).
+            </p>
+            <Button
+              variant="outline"
+              className="w-full h-auto py-4"
+              onClick={() => void handlePublish()}
+              disabled={submitting}
+            >
+              <Send className="w-5 h-5 mr-2" />
+              Yayınla (Test İçin)
+            </Button>
+          </>
+        )}
+
+        {!canApproveReject && !canConfirmForPublication && !canPublish && (
+          <div className="text-sm text-gray-500 italic">
+            Bu paket için Kurul tarafından alınabilecek bir aksiyon kalmadı (durum:{' '}
+            {display.label}).
+          </div>
+        )}
       </Card>
 
       {/* Approve Modal */}
@@ -244,7 +402,9 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
           <DialogHeader>
             <DialogTitle>Değerlendirme Paketini Onayla</DialogTitle>
             <DialogDescription>
-              Fakülte Yönetim Kurulu onayı ile bu paketteki tüm transfer kararları kesinleşecektir.
+              Fakülte Yönetim Kurulu onayı ile paket APPROVED_BY_BOARD durumuna geçer.
+              Yayın için ÖİDB'ye iletmek üzere bir sonraki adımda "Yayına Onayla"
+              butonu görünür.
             </DialogDescription>
           </DialogHeader>
 
@@ -254,10 +414,9 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
               <AlertDescription className="text-sm font-medium text-green-800">
                 <strong>Onay Etkisi:</strong>
                 <ul className="list-disc list-inside mt-2 space-y-1">
-                  <li>{MOCK_PACKAGE.summary.asilCount} öğrenci kabul edilecektir</li>
-                  <li>{MOCK_PACKAGE.summary.yedekCount} öğrenci yedek listesine alınacaktır</li>
-                  <li>Sonuçlar 24 saat içinde sisteme yansıtılacaktır</li>
-                  <li>ÖİDB ilan sürecini başlatmak üzere bilgilendirilecektir</li>
+                  <li>{pkg.asilApplicationIds.length} Asil öğrenci kabul edilecek</li>
+                  <li>{pkg.yedekApplicationIds.length} Yedek öğrenci listelenecek</li>
+                  <li>Lifecycle → APPROVED_BY_BOARD</li>
                 </ul>
               </AlertDescription>
             </Alert>
@@ -274,27 +433,38 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
             </div>
 
             <div className="flex items-start space-x-2 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <Checkbox 
+              <Checkbox
                 id="confirm"
                 checked={confirmedReview}
                 onCheckedChange={(checked) => setConfirmedReview(checked as boolean)}
               />
-              <Label htmlFor="confirm" className="text-xs cursor-pointer leading-relaxed text-gray-600 italic">
-                Tüm belgeleri incelediğimi ve Fakülte Yönetim Kurulu'nun bu değerlendirme paketini
-                nihai ilan için uygun bulduğunu onaylıyorum. Bu karar bağlayıcıdır ve resmi karar defterine işlenecektir.
+              <Label
+                htmlFor="confirm"
+                className="text-xs cursor-pointer leading-relaxed text-gray-600 italic"
+              >
+                Tüm belgeleri incelediğimi ve Fakülte Yönetim Kurulu'nun bu
+                değerlendirme paketini nihai ilan için uygun bulduğunu onaylıyorum.
               </Label>
             </div>
 
             <div className="flex justify-end space-x-3 pt-4">
-              <Button variant="outline" onClick={() => setShowApproveModal(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setShowApproveModal(false)}
+                disabled={submitting}
+              >
                 İptal
               </Button>
-              <Button 
-                onClick={handleApprove}
-                disabled={!boardNotes.trim() || !confirmedReview}
+              <Button
+                onClick={() => void handleApprove()}
+                disabled={!boardNotes.trim() || !confirmedReview || submitting}
                 style={{ backgroundColor: '#5C1010' }}
               >
-                <CheckCircle2 className="w-4 h-4 mr-2" />
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                )}
                 Onayı Tamamla
               </Button>
             </div>
@@ -308,7 +478,8 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
           <DialogHeader>
             <DialogTitle>Değerlendirme Paketini Reddet</DialogTitle>
             <DialogDescription>
-              Bu işlem paketi revizyon için iade edecektir. Lütfen detaylı neden belirtiniz.
+              Bu işlem paketi YGK'ya iade eder ve nihai sonuçların ilanını geciktirir.
+              Lütfen detaylı neden belirtiniz.
             </DialogDescription>
           </DialogHeader>
 
@@ -316,8 +487,8 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
             <Alert variant="destructive">
               <XCircle className="h-4 w-4" />
               <AlertDescription className="text-sm font-medium">
-                Paketin reddedilmesi nihai sonuçların ilanını geciktirecektir.
-                Paket, dekanlığa ve YGK'ya geri gönderilecektir.
+                Paket REJECTED_BY_BOARD durumuna geçer, başvuru durumları
+                IN_REVIEW_YGK'ya döner ve Dekanlığa otomatik bir bildirim gönderilir.
               </AlertDescription>
             </Alert>
 
@@ -333,21 +504,56 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
             </div>
 
             <div className="flex justify-end space-x-3 pt-4">
-              <Button variant="outline" onClick={() => setShowRejectModal(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setShowRejectModal(false)}
+                disabled={submitting}
+              >
                 İptal
               </Button>
-              <Button 
-                onClick={handleReject}
-                disabled={!rejectionReason.trim()}
+              <Button
+                onClick={() => void handleReject()}
+                disabled={!rejectionReason.trim() || submitting}
                 variant="destructive"
               >
-                <XCircle className="w-4 h-4 mr-2" />
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <XCircle className="w-4 h-4 mr-2" />
+                )}
                 Reddi Kesinleştir
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+interface OverviewCellProps {
+  label: string;
+  value: string;
+  tone?: 'green' | 'yellow';
+}
+
+function OverviewCell({ label, value, tone }: OverviewCellProps) {
+  const cls =
+    tone === 'green'
+      ? 'bg-green-50 border-green-200'
+      : tone === 'yellow'
+        ? 'bg-yellow-50 border-yellow-200'
+        : 'bg-gray-50';
+  const valueCls =
+    tone === 'green'
+      ? 'text-2xl text-green-600 font-bold'
+      : tone === 'yellow'
+        ? 'text-2xl text-yellow-600 font-bold'
+        : 'text-gray-900 font-bold';
+  return (
+    <div className={`p-4 rounded-lg ${cls}`}>
+      <div className="text-sm text-gray-500 mb-1">{label}</div>
+      <div className={valueCls}>{value}</div>
     </div>
   );
 }

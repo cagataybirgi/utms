@@ -108,6 +108,71 @@ const ACCEPTED_FORMATS: Record<DocumentType, string[]> = {
   [DocumentType.Portfolio]: ["PDF"],
 };
 
+// ─── File validation (pure, unit-testable) ──────────────────────────────────────
+
+/**
+ * Password-protected / encrypted PDFs keep the "%PDF" header but declare an
+ * /Encrypt entry in the trailer dictionary. The previous corruption check only
+ * inspected the first 4 bytes, so encrypted files passed validation and were
+ * stored anyway — the defect reported in Test Plan v2, TC 3C-1. Scanning for the
+ * /Encrypt token rejects them before they reach the document store / OCR.
+ */
+export function isEncryptedPdf(buffer: Buffer): boolean {
+  return buffer.includes(Buffer.from("/Encrypt"));
+}
+
+/**
+ * Validates an uploaded document. Throws ValidationError on the first problem.
+ * Exported (and pure) so the size / format / integrity rules can be unit-tested
+ * without a database or blob store.
+ *   - TC 3B-1: file exceeds 10 MB              → rejected
+ *   - TC 3B-2: unsupported format (e.g. .docx) → rejected
+ *   - TC 3C-1: password-protected PDF          → rejected (was the bug)
+ *   - TC 3C-2: corrupt PDF (no %PDF header)    → rejected
+ */
+export function assertValidUpload(
+  file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+  documentType: DocumentType,
+): void {
+  if (file.size > MAX_SIZE_BYTES) {
+    throw new ValidationError(
+      "Invalid format or file size. Please upload PDF/JPG/PNG under 10 MB.",
+      { code: "FILE_TOO_LARGE", sizeMb: Number((file.size / 1024 / 1024).toFixed(1)) },
+    );
+  }
+
+  const ext = file.originalname.split(".").pop()?.toLowerCase() ?? "";
+  const allowed = ACCEPTED_FORMATS[documentType].map((f) => f.toLowerCase());
+  if (!ALLOWED_EXTENSIONS.has(ext) || !allowed.includes(ext)) {
+    throw new ValidationError(
+      "Invalid format or file size. Please upload PDF/JPG/PNG under 10 MB.",
+      { code: "INVALID_FORMAT", ext, accepted: allowed },
+    );
+  }
+
+  if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    throw new ValidationError("Invalid format or file size. Please upload PDF/JPG/PNG under 10 MB.", {
+      code: "INVALID_MIME",
+      mimetype: file.mimetype,
+    });
+  }
+
+  if (ext === "pdf") {
+    const header = file.buffer.subarray(0, 5).toString("latin1");
+    if (!header.startsWith("%PDF")) {
+      throw new ValidationError("The file appears to be corrupt and could not be read.", {
+        code: "FILE_CORRUPT",
+      });
+    }
+    if (isEncryptedPdf(file.buffer)) {
+      throw new ValidationError(
+        "The PDF is password-protected. Please upload an unprotected copy.",
+        { code: "FILE_ENCRYPTED" },
+      );
+    }
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function isArchitectureDepartment(departmentId: string): boolean {
@@ -394,27 +459,6 @@ export class DocumentUploadService {
   }
 
   private validateFile(file: UploadedFile, documentType: DocumentType): void {
-    if (file.size > MAX_SIZE_BYTES) {
-      throw new ValidationError(
-        `File size ${(file.size / 1024 / 1024).toFixed(1)}MB exceeds the 10MB limit.`,
-      );
-    }
-
-    const ext = file.originalname.split(".").pop()?.toLowerCase() ?? "";
-    const allowed = ACCEPTED_FORMATS[documentType].map((f) => f.toLowerCase());
-    if (!ALLOWED_EXTENSIONS.has(ext) || !allowed.includes(ext)) {
-      throw new ValidationError(
-        `Format .${ext} is not allowed for ${documentType}. Accepted: ${allowed.join(", ")}.`,
-      );
-    }
-
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      throw new ValidationError(`MIME type ${file.mimetype} is not accepted.`);
-    }
-
-    // Basic corruption check: PDF files must start with %PDF
-    if (ext === "pdf" && !file.buffer.slice(0, 4).toString().startsWith("%PDF")) {
-      throw new ValidationError("FILE_CORRUPT: The PDF file appears to be corrupt or password-protected.");
-    }
+    assertValidUpload(file, documentType);
   }
 }

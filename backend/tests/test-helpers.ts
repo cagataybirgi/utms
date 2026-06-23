@@ -29,6 +29,7 @@ export function buildTestKit(): TestKit {
 
 export const TEST_USERS = {
   oidb: "user-oidb-1",
+  ydyo: "user-ydyo-1",
   ygkMember: "user-ygk-cmpe-1",
   ygkChair: "user-ygk-chair-cmpe",
   deans: "user-deans-eng",
