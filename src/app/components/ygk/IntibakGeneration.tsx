@@ -85,6 +85,14 @@ export function IntibakGeneration({ applicationId, studentName, readOnly = false
       .filter((m) => ['SUGGESTED_MATCH', 'APPROVED', 'MANUAL_OVERRIDE', 'NO_PREVIOUS_EQUIVALENT'].includes(m.status) && m.targetCourseCode)
       .map((m) => m.targetCourseCode as string),
   );
+  // Targets covered specifically via an "Eşdeğeri Yok" decision (no source
+  // course). These can be reverted right here; targets covered by a real
+  // source→target mapping are changed from the dropdown above instead.
+  const noEquivTargets = new Set(
+    (dto?.mappings ?? [])
+      .filter((m) => m.status === 'NO_PREVIOUS_EQUIVALENT' && m.targetCourseCode)
+      .map((m) => m.targetCourseCode as string),
+  );
   const uncoveredTargets = (dto?.targetCurriculum ?? []).filter((t) => !coveredTargets.has(t.code));
   const pendingSources = sourceRows.filter((m) => m.status === 'PENDING_REVIEW');
   const courseName = (code: string) => dto?.previousCourses.find((c) => c.code === code)?.name ?? code;
@@ -128,6 +136,9 @@ export function IntibakGeneration({ applicationId, studentName, readOnly = false
 
   const markTargetNoEquivalent = (code: string) =>
     applyMutations([{ sourceCourseCodes: [], targetCourseCode: code, status: 'NO_PREVIOUS_EQUIVALENT' }]);
+
+  const revertTargetNoEquivalent = (code: string) =>
+    applyMutations([{ sourceCourseCodes: [], targetCourseCode: code, status: 'NO_PREVIOUS_EQUIVALENT', remove: true }]);
 
   const markAllUncovered = () => {
     if (uncoveredTargets.length === 0) return;
@@ -296,7 +307,12 @@ export function IntibakGeneration({ applicationId, studentName, readOnly = false
               <div key={t.code} className={`flex items-center justify-between p-2 rounded border text-xs ${errored ? 'border-red-300 bg-red-50' : covered ? 'border-green-100 bg-green-50' : 'border-gray-200 bg-white'}`}>
                 <span className="font-medium text-gray-800">{t.code} — {t.name}</span>
                 {covered ? (
-                  <span className="inline-flex items-center text-green-700"><CheckCircle2 className="w-4 h-4 mr-1" />Karar verildi</span>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-flex items-center text-green-700"><CheckCircle2 className="w-4 h-4 mr-1" />Karar verildi</span>
+                    {!readOnly && noEquivTargets.has(t.code) && (
+                      <Button size="sm" variant="ghost" className="h-6 text-[11px] text-gray-500" disabled={readOnly || busy} onClick={() => revertTargetNoEquivalent(t.code)}>Geri Al</Button>
+                    )}
+                  </span>
                 ) : (
                   <Button size="sm" variant="ghost" className="h-6 text-[11px] text-[#C00000]" disabled={readOnly || busy} onClick={() => markTargetNoEquivalent(t.code)}>Eşdeğeri Yok</Button>
                 )}

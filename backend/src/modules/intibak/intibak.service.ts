@@ -65,6 +65,10 @@ export interface MappingMutation {
   sourceCourseCodes: string[];
   targetCourseCode: string | null;
   status: MappingStatus;
+  // When true together with a NO_PREVIOUS_EQUIVALENT status, removes the
+  // existing "no equivalent" decision for the target so it becomes undecided
+  // again (lets the YGK member revert an "Eşdeğeri Yok" click).
+  remove?: boolean;
 }
 
 export interface DepartmentOverviewDto {
@@ -489,6 +493,14 @@ export class IntibakService {
       const existingTargetForCode = table.mappings.findIndex(
         (e) => e.targetCourseCode === m.targetCourseCode && e.status === MappingStatus.NoPreviousEquivalent,
       );
+      if (m.remove) {
+        // Revert a previous "Eşdeğeri Yok" decision: drop the entry so the
+        // target goes back to undecided. No-op if it was never marked.
+        if (existingTargetForCode >= 0) {
+          table.mappings.splice(existingTargetForCode, 1);
+        }
+        return;
+      }
       if (existingTargetForCode === -1) {
         table.mappings.push({
           entryId: randomUUID(),
