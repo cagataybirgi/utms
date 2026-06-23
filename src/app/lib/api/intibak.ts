@@ -68,6 +68,8 @@ export interface MappingMutation {
   sourceCourseCodes: string[];
   targetCourseCode: string | null;
   status: MappingStatus;
+  // Set with a NO_PREVIOUS_EQUIVALENT status to undo an "Eşdeğeri Yok" decision.
+  remove?: boolean;
 }
 
 export class IntibakApiError extends Error {

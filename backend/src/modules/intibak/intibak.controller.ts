@@ -16,6 +16,7 @@ const MappingMutationSchema = z.object({
   sourceCourseCodes: z.array(z.string()).default([]),
   targetCourseCode: z.string().nullable(),
   status: z.nativeEnum(MappingStatus),
+  remove: z.boolean().optional(),
 });
 
 const UpdateMappingsSchema = z.object({
