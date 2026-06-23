@@ -11,20 +11,20 @@ const DecisionSchema = z.object({
 export class YdyoController {
   constructor(private readonly service: YdyoService) {}
 
-  listQueue = (_req: Request, res: Response): void => {
-    res.json({ items: this.service.listQueue() });
+  listQueue = async (_req: Request, res: Response): Promise<void> => {
+    res.json({ items: await this.service.listQueue() });
   };
 
-  getDetail = (req: Request, res: Response): void => {
+  getDetail = async (req: Request, res: Response): Promise<void> => {
     const { applicationId } = req.params;
-    res.json(this.service.detail(applicationId));
+    res.json(await this.service.detail(applicationId));
   };
 
-  decide = (req: Request, res: Response): void => {
+  decide = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = DecisionSchema.parse(req.body);
-    const application = this.service.decide(applicationId, userId, body);
+    const application = await this.service.decide(applicationId, userId, body);
     res.json({ application, message: "Language review recorded." });
   };
 

@@ -148,7 +148,10 @@ export class RankingService {
       .filter(
         (app: Application) =>
           app.currentStatus === ApplicationStatus.IntakeVerified ||
-          app.currentStatus === ApplicationStatus.InReviewYgk
+          app.currentStatus === ApplicationStatus.InReviewYgk ||
+          // Apps that cleared YDYO language review (or were exempt at ÖİDB) land
+          // here awaiting YGK; surface them in the queue so the handoff is visible.
+          app.currentStatus === ApplicationStatus.PendingYgkForwarding
       )
       .sort((a: Application, b: Application) => {
         // Sort by submittedAt ascending (oldest first)
@@ -192,12 +195,18 @@ export class RankingService {
       return;
     }
 
-    if (app.currentStatus !== ApplicationStatus.IntakeVerified) {
+    // Accept apps that reached YGK either straight from ÖİDB (INTAKE_VERIFIED)
+    // or via the YDYO language step / ÖİDB exemption (PENDING_YGK_FORWARDING).
+    if (
+      app.currentStatus !== ApplicationStatus.IntakeVerified &&
+      app.currentStatus !== ApplicationStatus.PendingYgkForwarding
+    ) {
       throw new ValidationError(
-        `Application must be in INTAKE_VERIFIED status. Current: ${app.currentStatus}`
+        `Application must be in INTAKE_VERIFIED or PENDING_YGK_FORWARDING status. Current: ${app.currentStatus}`
       );
     }
 
+    const previousStatus = app.currentStatus;
     app.currentStatus = ApplicationStatus.InReviewYgk;
     await this.deps.applications.save(app);
 
@@ -207,7 +216,7 @@ export class RankingService {
       actionType: "YGK_REVIEW_STARTED",
       affectedEntityId: applicationId,
       affectedEntityType: "Application",
-      previousValue: JSON.stringify({ status: ApplicationStatus.IntakeVerified }),
+      previousValue: JSON.stringify({ status: previousStatus }),
       newValue: JSON.stringify({ status: ApplicationStatus.InReviewYgk }),
     });
   }

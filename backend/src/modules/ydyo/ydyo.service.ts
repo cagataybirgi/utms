@@ -9,11 +9,11 @@ import {
   UserRole,
 } from "../../shared/types";
 import { ConflictError, NotFoundError, ValidationError } from "../../shared/errors";
-import { IApplicationRepository, IDocumentRepository } from "../../shared/repositories";
+import { IAsyncApplicationRepository, IDocumentRepository } from "../../shared/repositories";
 import { AuditLogger, NotificationService } from "../../shared/audit";
 
 export interface YdyoServiceDeps {
-  applications: IApplicationRepository;
+  applications: IAsyncApplicationRepository;
   documents: IDocumentRepository;
   audit: AuditLogger;
   notifications: NotificationService;
@@ -68,9 +68,9 @@ const EXAM_TYPES: LanguageExamType[] = ["TOEFL_IBT", "IELTS", "YDS"];
 export class YdyoService {
   constructor(private readonly deps: YdyoServiceDeps) {}
 
-  listQueue(): YdyoQueueItem[] {
-    return this.deps.applications
-      .findAll()
+  async listQueue(): Promise<YdyoQueueItem[]> {
+    const all = await this.deps.applications.findAll();
+    return all
       .filter((a) => a.routedToYdyo === true || a.currentStatus === ApplicationStatus.InReviewYdyo)
       .sort((a, b) => a.applicationId.localeCompare(b.applicationId))
       .map((a) => {
@@ -89,12 +89,12 @@ export class YdyoService {
       });
   }
 
-  detail(applicationId: string): YdyoDetailDto {
-    const application = this.requireApp(applicationId);
+  async detail(applicationId: string): Promise<YdyoDetailDto> {
+    const application = await this.requireApp(applicationId);
     const languageProof = this.resolveProof(application);
     if (!application.languageProof) {
       application.languageProof = languageProof;
-      this.deps.applications.save(application);
+      await this.deps.applications.save(application);
     }
     const document = this.deps.documents
       .findByApplicationId(applicationId)
@@ -109,8 +109,12 @@ export class YdyoService {
     };
   }
 
-  decide(applicationId: string, actorUserId: string, input: DecideInput): Application {
-    const application = this.requireApp(applicationId);
+  async decide(
+    applicationId: string,
+    actorUserId: string,
+    input: DecideInput,
+  ): Promise<Application> {
+    const application = await this.requireApp(applicationId);
     if (!application.routedToYdyo && application.currentStatus !== ApplicationStatus.InReviewYdyo) {
       throw new ConflictError(
         "NOT_ROUTED_TO_YDYO",
@@ -137,7 +141,7 @@ export class YdyoService {
     }
     application.currentStatus = ApplicationStatus.PendingYgkForwarding;
     application.routedToDeansOffice = true;
-    this.deps.applications.save(application);
+    await this.deps.applications.save(application);
 
     this.deps.audit.write({
       actorUserId,
@@ -189,8 +193,8 @@ export class YdyoService {
     };
   }
 
-  private requireApp(applicationId: string): Application {
-    const a = this.deps.applications.findById(applicationId);
+  private async requireApp(applicationId: string): Promise<Application> {
+    const a = await this.deps.applications.findById(applicationId);
     if (!a) throw new NotFoundError(`Application not found: ${applicationId}`);
     return a;
   }

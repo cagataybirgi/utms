@@ -3,6 +3,8 @@ import {
   Application,
   ApplicationStatus,
   CorrectionReason,
+  LanguageDecision,
+  LanguageProofInfo,
   PreScreeningResult,
   RankingCategory,
 } from "../types";
@@ -50,6 +52,14 @@ export function toDomain(row: PrismaApplicationRow): Application {
     routedToYdyo: row.routedToYdyo,
     routedToDeansOffice: row.routedToDeansOffice,
     ydyoExempt: row.ydyoExempt,
+    languageProof:
+      (row.languageProof as unknown as LanguageProofInfo) ?? undefined,
+    ydyoDecision: (row.ydyoDecision as LanguageDecision) ?? undefined,
+    ydyoReviewNotes: row.ydyoReviewNotes ?? undefined,
+    ydyoReviewedBy: row.ydyoReviewedBy ?? undefined,
+    ydyoReviewedAt: row.ydyoReviewedAt
+      ? row.ydyoReviewedAt.toISOString()
+      : undefined,
     rankingCategory: (row.rankingCategory as RankingCategory) ?? undefined,
     transferScore: row.transferScore ?? undefined,
     submittedAt: row.submittedAt.toISOString(),
@@ -94,14 +104,24 @@ export function toPrismaCreate(
     routedToYdyo: app.routedToYdyo,
     routedToDeansOffice: app.routedToDeansOffice,
     ydyoExempt: app.ydyoExempt,
+    languageProof: app.languageProof
+      ? (app.languageProof as unknown as Prisma.InputJsonValue)
+      : Prisma.DbNull,
+    ydyoDecision: app.ydyoDecision ?? null,
+    ydyoReviewNotes: app.ydyoReviewNotes ?? null,
+    ydyoReviewedBy: app.ydyoReviewedBy ?? null,
+    ydyoReviewedAt: app.ydyoReviewedAt ? new Date(app.ydyoReviewedAt) : null,
     rankingCategory: app.rankingCategory ?? null,
     submittedAt: new Date(app.submittedAt),
   };
 }
 
 /**
- * The subset of columns the ranking workflow mutates via repository.save().
- * Kept narrow so a save never clobbers intake/document data on the row.
+ * The columns a repository.save() may mutate across the intake → ranking
+ * workflow. The domain Application is always read in full (findById → toDomain)
+ * before being mutated and saved back, so every field here round-trips safely —
+ * a save never silently drops a column the caller changed. Intake/routing fields
+ * are included so the ÖİDB and Dean handoffs persist to Neon (not just status).
  */
 export function toPrismaUpdate(
   app: Application
@@ -112,5 +132,20 @@ export function toPrismaUpdate(
     rankingCategory: app.rankingCategory ?? null,
     rejectionReason: app.rejectionReason ?? null,
     preScreening: app.preScreening as unknown as Prisma.InputJsonValue,
+    correctionReasons: app.correctionReasons as unknown as Prisma.InputJsonValue,
+    intakeVerifiedBy: app.intakeVerifiedBy ?? null,
+    intakeVerifiedAt: app.intakeVerifiedAt
+      ? new Date(app.intakeVerifiedAt)
+      : null,
+    routedToYdyo: app.routedToYdyo,
+    routedToDeansOffice: app.routedToDeansOffice,
+    ydyoExempt: app.ydyoExempt,
+    languageProof: app.languageProof
+      ? (app.languageProof as unknown as Prisma.InputJsonValue)
+      : Prisma.DbNull,
+    ydyoDecision: app.ydyoDecision ?? null,
+    ydyoReviewNotes: app.ydyoReviewNotes ?? null,
+    ydyoReviewedBy: app.ydyoReviewedBy ?? null,
+    ydyoReviewedAt: app.ydyoReviewedAt ? new Date(app.ydyoReviewedAt) : null,
   };
 }

@@ -191,6 +191,13 @@ model Application {
   routedToYdyo        Boolean  @default(false) @map("routed_to_ydyo")
   routedToDeansOffice Boolean  @default(false) @map("routed_to_deans_office")
   ydyoExempt          Boolean  @default(false) @map("ydyo_exempt")
+  // Scenario 3.1 — YDYO language review persisted to Neon so the YDYO queue
+  // survives restarts and stays in the same store ÖİDB forwards into.
+  languageProof       Json?     @map("language_proof")
+  ydyoDecision        String?   @map("ydyo_decision")
+  ydyoReviewNotes     String?   @map("ydyo_review_notes")
+  ydyoReviewedBy      String?   @map("ydyo_reviewed_by")
+  ydyoReviewedAt      DateTime? @map("ydyo_reviewed_at")
   rankingCategory     String?  @map("ranking_category")
 
   // studentId is stored as plain string — no FK to students table so local dev
