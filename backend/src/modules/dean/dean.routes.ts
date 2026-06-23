@@ -123,7 +123,11 @@ export function buildDeanRouter(container: AppContainer): Router {
         );
       }
 
-      app.currentStatus = ApplicationStatus.IntakeVerified;
+      // Return to the ÖİDB pool for re-handling (e.g. wrong faculty routing).
+      // PENDING_OIDB_VERIFICATION is one of the statuses the ÖİDB queue lists,
+      // so the student reappears there; INTAKE_VERIFIED would not (and means the
+      // opposite: already cleared by ÖİDB).
+      app.currentStatus = ApplicationStatus.PendingOidbVerification;
       app.rejectionReason = String(note).trim();
       await applications.save(app);
 
@@ -134,7 +138,7 @@ export function buildDeanRouter(container: AppContainer): Router {
         affectedEntityId: applicationId,
         affectedEntityType: "Application",
         previousValue: JSON.stringify({ status: ApplicationStatus.PendingDeansOfficeReview }),
-        newValue: JSON.stringify({ status: ApplicationStatus.IntakeVerified, note }),
+        newValue: JSON.stringify({ status: ApplicationStatus.PendingOidbVerification, note }),
       });
 
       res.json({ message: "Başvuru ÖİDB'ye iade edildi.", applicationId });

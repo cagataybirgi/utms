@@ -26,48 +26,48 @@ const ForwardSchema = z.object({
 export class OidbController {
   constructor(private readonly service: OidbService) {}
 
-  listPool = (_req: Request, res: Response): void => {
-    const pool = this.service.listPool();
+  listPool = async (_req: Request, res: Response): Promise<void> => {
+    const pool = await this.service.listPool();
     res.json({ items: pool, count: pool.length });
   };
 
-  getDetail = (req: Request, res: Response): void => {
+  getDetail = async (req: Request, res: Response): Promise<void> => {
     const { applicationId } = req.params;
-    const detail = this.service.loadDetail(applicationId);
+    const detail = await this.service.loadDetail(applicationId);
     res.json(detail);
   };
 
-  verify = (req: Request, res: Response): void => {
+  verify = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
-    const updated = this.service.verify(applicationId, userId);
+    const updated = await this.service.verify(applicationId, userId);
     res.json({ application: updated, message: "Application status updated to INTAKE_VERIFIED" });
   };
 
-  returnForCorrection = (req: Request, res: Response): void => {
+  returnForCorrection = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = ReturnSchema.parse(req.body);
-    const updated = this.service.returnForCorrection(applicationId, userId, body);
+    const updated = await this.service.returnForCorrection(applicationId, userId, body);
     res.json({
       application: updated,
       message: "The action is successfully submitted.",
     });
   };
 
-  reject = (req: Request, res: Response): void => {
+  reject = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = RejectSchema.parse(req.body);
-    const updated = this.service.reject(applicationId, userId, body);
+    const updated = await this.service.reject(applicationId, userId, body);
     res.json({ application: updated, message: "Application permanently closed (rejected)." });
   };
 
-  forward = (req: Request, res: Response): void => {
+  forward = async (req: Request, res: Response): Promise<void> => {
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = ForwardSchema.parse(req.body ?? {});
-    const updated = this.service.forward(applicationId, userId, body);
+    const updated = await this.service.forward(applicationId, userId, body);
     res.json({
       application: updated,
       message: "Application forwarded; status: PENDING_YGK_FORWARDING",

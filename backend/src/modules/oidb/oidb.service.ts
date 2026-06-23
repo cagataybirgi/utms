@@ -15,7 +15,7 @@ import {
   ValidationError,
 } from "../../shared/errors";
 import {
-  IApplicationRepository,
+  IAsyncApplicationRepository,
   IDocumentRepository,
   IUserRepository,
 } from "../../shared/repositories";
@@ -23,7 +23,7 @@ import { EDevletMockClient } from "../../shared/external/edevlet-client";
 import { AuditLogger, NotificationService } from "../../shared/audit";
 
 export interface OidbServiceDeps {
-  applications: IApplicationRepository;
+  applications: IAsyncApplicationRepository;
   documents: IDocumentRepository;
   users: IUserRepository;
   edevlet: EDevletMockClient;
@@ -57,15 +57,15 @@ const POOL_STATUSES = new Set([
 export class OidbService {
   constructor(private readonly deps: OidbServiceDeps) {}
 
-  listPool(): Application[] {
-    return this.deps.applications
-      .findAll()
+  async listPool(): Promise<Application[]> {
+    const all = await this.deps.applications.findAll();
+    return all
       .filter((a) => POOL_STATUSES.has(a.currentStatus))
       .sort((a, b) => a.applicationId.localeCompare(b.applicationId));
   }
 
-  loadDetail(applicationId: string): ApplicationDetailDto {
-    const application = this.requireApp(applicationId);
+  async loadDetail(applicationId: string): Promise<ApplicationDetailDto> {
+    const application = await this.requireApp(applicationId);
     if (!this.deps.documents.isStoreReachable()) {
       throw new ServiceUnavailableError(
         "DOCUMENT_STORE_UNREACHABLE",
@@ -95,8 +95,8 @@ export class OidbService {
     return { application, documents, verifications };
   }
 
-  verify(applicationId: string, actorUserId: string): Application {
-    const application = this.requireApp(applicationId);
+  async verify(applicationId: string, actorUserId: string): Promise<Application> {
+    const application = await this.requireApp(applicationId);
     if (!this.deps.documents.isStoreReachable()) {
       throw new ServiceUnavailableError(
         "DOCUMENT_STORE_UNREACHABLE",
@@ -116,7 +116,7 @@ export class OidbService {
     application.currentStatus = ApplicationStatus.IntakeVerified;
     application.intakeVerifiedBy = actorUserId;
     application.intakeVerifiedAt = new Date().toISOString();
-    this.deps.applications.save(application);
+    await this.deps.applications.save(application);
     this.deps.audit.write({
       actorUserId,
       actorRole: UserRole.OidbOfficer,
@@ -136,11 +136,11 @@ export class OidbService {
     return application;
   }
 
-  returnForCorrection(
+  async returnForCorrection(
     applicationId: string,
     actorUserId: string,
     input: ReturnInput,
-  ): Application {
+  ): Promise<Application> {
     if (!input.reasons || input.reasons.length === 0) {
       throw new ValidationError("Invalid/empty reason/slot. At least one reason is required.");
     }
@@ -152,7 +152,7 @@ export class OidbService {
         throw new ValidationError("Reason text must be non-empty for every slot.");
       }
     }
-    const application = this.requireApp(applicationId);
+    const application = await this.requireApp(applicationId);
     if (
       application.currentStatus !== ApplicationStatus.PendingOidbVerification &&
       application.currentStatus !== ApplicationStatus.ReturnedForCorrection
@@ -165,7 +165,7 @@ export class OidbService {
     const previous = application.currentStatus;
     application.currentStatus = ApplicationStatus.ReturnedForCorrection;
     application.correctionReasons = input.reasons;
-    this.deps.applications.save(application);
+    await this.deps.applications.save(application);
     this.deps.audit.write({
       actorUserId,
       actorRole: UserRole.OidbOfficer,
@@ -185,12 +185,16 @@ export class OidbService {
     return application;
   }
 
-  reject(applicationId: string, actorUserId: string, input: RejectInput): Application {
+  async reject(
+    applicationId: string,
+    actorUserId: string,
+    input: RejectInput,
+  ): Promise<Application> {
     const justification = (input.justification ?? "").trim();
     if (justification.length === 0) {
       throw new ValidationError("Justification is required to reject an application.");
     }
-    const application = this.requireApp(applicationId);
+    const application = await this.requireApp(applicationId);
     if (
       application.currentStatus !== ApplicationStatus.PendingOidbVerification &&
       application.currentStatus !== ApplicationStatus.ReturnedForCorrection
@@ -203,7 +207,7 @@ export class OidbService {
     const previous = application.currentStatus;
     application.currentStatus = ApplicationStatus.RejectedAtIntake;
     application.rejectionReason = justification;
-    this.deps.applications.save(application);
+    await this.deps.applications.save(application);
     this.deps.audit.write({
       actorUserId,
       actorRole: UserRole.OidbOfficer,
@@ -223,8 +227,12 @@ export class OidbService {
     return application;
   }
 
-  forward(applicationId: string, actorUserId: string, input: ForwardInput): Application {
-    const application = this.requireApp(applicationId);
+  async forward(
+    applicationId: string,
+    actorUserId: string,
+    input: ForwardInput,
+  ): Promise<Application> {
+    const application = await this.requireApp(applicationId);
     if (application.currentStatus !== ApplicationStatus.IntakeVerified) {
       throw new ConflictError(
         "INVALID_STATUS",
@@ -241,7 +249,7 @@ export class OidbService {
       application.routedToDeansOffice = false;
       application.currentStatus = ApplicationStatus.InReviewYdyo;
     }
-    this.deps.applications.save(application);
+    await this.deps.applications.save(application);
     this.deps.audit.write({
       actorUserId,
       actorRole: UserRole.OidbOfficer,
@@ -259,8 +267,8 @@ export class OidbService {
     return application;
   }
 
-  private requireApp(applicationId: string): Application {
-    const a = this.deps.applications.findById(applicationId);
+  private async requireApp(applicationId: string): Promise<Application> {
+    const a = await this.deps.applications.findById(applicationId);
     if (!a) throw new NotFoundError(`Application not found: ${applicationId}`);
     return a;
   }

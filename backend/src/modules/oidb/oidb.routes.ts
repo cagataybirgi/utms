@@ -5,12 +5,27 @@ import { AppContainer } from "../../shared/container";
 import { AuditLogger, NotificationService } from "../../shared/audit";
 import { requireRoles } from "../../shared/middleware/rbac";
 import { UserRole } from "../../shared/types";
+import { asyncHandler } from "../../shared/middleware/async-handler";
+import {
+  IAsyncApplicationRepository,
+  InMemoryAsyncApplicationRepository,
+  PrismaApplicationRepository,
+} from "../../shared/repositories";
 
 export function buildOidbRouter(container: AppContainer): Router {
   const audit = new AuditLogger(container.audit);
   const notifications = new NotificationService(container.notifications);
+
+  // Runtime reads/writes applications from Neon (Prisma) so the ÖİDB pool sees
+  // live student submissions and Dean → ÖİDB returns, which are all persisted
+  // there. Tests use the in-memory container (NODE_ENV=test).
+  const useDatabase = process.env.NODE_ENV !== "test";
+  const applications: IAsyncApplicationRepository = useDatabase
+    ? new PrismaApplicationRepository()
+    : new InMemoryAsyncApplicationRepository(container.applications);
+
   const service = new OidbService({
-    applications: container.applications,
+    applications,
     documents: container.documents,
     users: container.users,
     edevlet: container.edevlet,
@@ -22,12 +37,12 @@ export function buildOidbRouter(container: AppContainer): Router {
   const r = Router();
   r.use(requireRoles(UserRole.OidbOfficer, UserRole.SystemAdmin));
 
-  r.get("/applications", controller.listPool);
-  r.get("/applications/:applicationId", controller.getDetail);
-  r.post("/applications/:applicationId/verify", controller.verify);
-  r.post("/applications/:applicationId/return", controller.returnForCorrection);
-  r.post("/applications/:applicationId/reject", controller.reject);
-  r.post("/applications/:applicationId/forward", controller.forward);
+  r.get("/applications", asyncHandler(controller.listPool));
+  r.get("/applications/:applicationId", asyncHandler(controller.getDetail));
+  r.post("/applications/:applicationId/verify", asyncHandler(controller.verify));
+  r.post("/applications/:applicationId/return", asyncHandler(controller.returnForCorrection));
+  r.post("/applications/:applicationId/reject", asyncHandler(controller.reject));
+  r.post("/applications/:applicationId/forward", asyncHandler(controller.forward));
 
   return r;
 }
