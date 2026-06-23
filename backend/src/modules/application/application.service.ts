@@ -170,8 +170,28 @@ export class ApplicationService {
       throw new Error("Bu aşamadaki başvuru iptal edilemez");
     }
 
-    await prisma.application.delete({
-      where: { applicationId },
+    // Recursively remove all dependent rows before the application itself so the
+    // FK constraints (documents, appeals, intibak tables, stage logs, and the
+    // document_versions hanging off each document) don't block the delete.
+    await prisma.$transaction(async (tx) => {
+      const documents = await tx.document.findMany({
+        where: { applicationId },
+        select: { documentId: true },
+      });
+      const documentIds = documents.map((d) => d.documentId);
+
+      if (documentIds.length > 0) {
+        await tx.documentVersion.deleteMany({
+          where: { documentId: { in: documentIds } },
+        });
+      }
+
+      await tx.document.deleteMany({ where: { applicationId } });
+      await tx.appeal.deleteMany({ where: { applicationId } });
+      await tx.intibakTable.deleteMany({ where: { applicationId } });
+      await tx.applicationStageLog.deleteMany({ where: { applicationId } });
+
+      await tx.application.delete({ where: { applicationId } });
     });
   }
 }
