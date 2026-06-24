@@ -39,6 +39,12 @@ export class InMemoryUserRepository implements IUserRepository {
     }
     return undefined;
   }
+
+  findByRole(role: string): User[] {
+    return Array.from(this.store.values()).filter((u) =>
+      (u.roles as unknown as string[]).includes(role),
+    );
+  }
 }
 
 export class InMemoryApplicationRepository implements IApplicationRepository {

@@ -17,8 +17,13 @@ import {
 } from "../../shared/repositories";
 import { BoardService } from "./board.service";
 import { BoardController } from "./board.controller";
+import { INotificationStore } from "../notification/notification.store";
+import { createNotificationStore } from "../notification/notification.routes";
 
-export function buildBoardRouter(container: AppContainer): Router {
+export function buildBoardRouter(
+  container: AppContainer,
+  notificationStore: INotificationStore = createNotificationStore(container),
+): Router {
   // Runtime persists applications, packages and board states to Neon (Prisma).
   // Tests run against the in-memory container (NODE_ENV=test).
   const useDatabase = process.env.NODE_ENV !== "test";
@@ -41,6 +46,7 @@ export function buildBoardRouter(container: AppContainer): Router {
     boardStates,
     audit,
     notifications,
+    notificationStore,
   });
   const controller = new BoardController(service);
 

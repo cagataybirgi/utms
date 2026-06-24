@@ -66,3 +66,29 @@ export const DEPARTMENT_FACULTY: Record<string, FacultyId> = {
 export function deptLabel(id: string)     { return DEPARTMENT_LABELS[id]    ?? id; }
 export function facultyLabel(id: string)  { return FACULTY_LABELS[id]       ?? id; }
 export function transferLabel(type: string) { return TRANSFER_TYPE_LABELS[type] ?? type; }
+
+// ── Application status labels ─────────────────────────────────────────────────
+// Human-readable Turkish names so screens never show raw status codes.
+export const APPLICATION_STATUS_LABELS: Record<string, string> = {
+  DRAFT: "Taslak",
+  PENDING_DOCUMENT_UPLOAD: "Belge Yükleme Bekleniyor",
+  PENDING_OIDB_VERIFICATION: "ÖİDB Doğrulaması Bekleniyor",
+  INTAKE_VERIFIED: "Ön İnceleme Tamamlandı",
+  PENDING_YGK_FORWARDING: "YGK'ya İletim Bekleniyor",
+  IN_REVIEW_YDYO: "YDYÖ İncelemesinde",
+  IN_REVIEW_YGK: "YGK İncelemesinde",
+  RETURNED_FOR_CORRECTION: "Düzeltme İçin İade Edildi",
+  REJECTED_AT_INTAKE: "Ön İncelemede Reddedildi",
+  RANKED_ASIL: "Asil Olarak Sıralandı",
+  RANKED_YEDEK: "Yedek Olarak Sıralandı",
+  RANKED_RED: "Sıralamada Reddedildi",
+  INTIBAK_COMPLETED: "İntibak Tamamlandı",
+  PENDING_DEANS_OFFICE_REVIEW: "Dekanlık İncelemesi Bekleniyor",
+  APPROVED_FACULTY_BOARD: "Fakülte Kurulu Onayladı",
+  READY_FOR_PUBLICATION: "Yayına Hazır",
+  RESULTS_PUBLISHED: "Sonuçlar İlan Edildi",
+};
+
+export function applicationStatusLabel(status: string) {
+  return APPLICATION_STATUS_LABELS[status] ?? status;
+}

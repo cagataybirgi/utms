@@ -35,6 +35,21 @@ export interface StageLogDto {
   notes: string | null;
 }
 
+// Scenario 7 — the student-facing final result reads the intibak mapping rows
+// straight off the locked intibak table so the muafiyet (course equivalence)
+// table on the result screen reflects the real YGK decision, not a mock.
+export interface IntibakCourseRowDto {
+  sourceCourses: { code: string; name: string; ects: number }[];
+  targetCourse: { code: string; name: string; ects: number } | null;
+  status: string;
+}
+
+export interface IntibakDetailDto {
+  isLocked: boolean;
+  rows: IntibakCourseRowDto[];
+  totalExemptedEcts: number;
+}
+
 export interface ApplicationDetailDto {
   applicationId: string;
   studentFullName: string;
@@ -49,8 +64,10 @@ export interface ApplicationDetailDto {
   correctionReasons: unknown[];
   rejectionReason: string | null;
   rankingCategory: string | null;
+  transferScore: number | null;
   hasIntibak: boolean;
   hasLockedIntibak: boolean;
+  intibak: IntibakDetailDto | null;
   stageLogs: StageLogDto[];
   targetDepartmentId: string;
   targetFacultyId: string;
@@ -137,8 +154,10 @@ export class ApplicationService {
       correctionReasons: Array.isArray(app.correctionReasons) ? app.correctionReasons as unknown[] : [],
       rejectionReason: app.rejectionReason ?? null,
       rankingCategory: app.rankingCategory ?? null,
+      transferScore: app.transferScore ?? null,
       hasIntibak: !!intibakTable,
       hasLockedIntibak: intibakTable?.isLocked ?? false,
+      intibak: intibakTable ? buildIntibakDetail(intibakTable) : null,
       stageLogs: stageLogs.map((l) => ({
         stageKey: l.stageKey,
         actorName: l.actorName ?? null,
@@ -194,4 +213,43 @@ export class ApplicationService {
       await tx.application.delete({ where: { applicationId } });
     });
   }
+}
+
+// ─── Intibak detail builder ─────────────────────────────────────────────────
+// Resolves the locked intibak table's JSON columns (previousCourses,
+// targetCurriculum, mappings) into display rows for the student result screen.
+// "Exempted" ECTS counts only mappings that landed on a real target course.
+
+interface PrevCourse { code: string; name: string; ects: number; letterGrade?: string }
+interface TargetCourse { code: string; name: string; ects: number }
+interface Mapping { sourceCourseCodes: string[]; targetCourseCode: string | null; status: string }
+
+function buildIntibakDetail(table: {
+  isLocked: boolean;
+  previousCourses: unknown;
+  targetCurriculum: unknown;
+  mappings: unknown;
+}): IntibakDetailDto {
+  const prev = (table.previousCourses as PrevCourse[]) ?? [];
+  const target = (table.targetCurriculum as TargetCourse[]) ?? [];
+  const mappings = (table.mappings as Mapping[]) ?? [];
+
+  const prevByCode = new Map(prev.map((c) => [c.code, c]));
+  const targetByCode = new Map(target.map((c) => [c.code, c]));
+
+  let totalExemptedEcts = 0;
+  const rows: IntibakCourseRowDto[] = mappings.map((m) => {
+    const sourceCourses = m.sourceCourseCodes
+      .map((code) => prevByCode.get(code))
+      .filter((c): c is PrevCourse => !!c)
+      .map((c) => ({ code: c.code, name: c.name, ects: c.ects }));
+    const t = m.targetCourseCode ? targetByCode.get(m.targetCourseCode) ?? null : null;
+    const targetCourse = t ? { code: t.code, name: t.name, ects: t.ects } : null;
+    if (targetCourse && (m.status === "APPROVED" || m.status === "SUGGESTED_MATCH" || m.status === "MANUAL_OVERRIDE")) {
+      totalExemptedEcts += targetCourse.ects;
+    }
+    return { sourceCourses, targetCourse, status: m.status };
+  });
+
+  return { isLocked: table.isLocked, rows, totalExemptedEcts };
 }

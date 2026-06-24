@@ -391,6 +391,9 @@ model NotificationRecord {
   body            String
   isDelivered     Boolean  @default(false) @map("is_delivered")
   failureReason   String?  @map("failure_reason")
+  // Bell read-state (Scenario 7 + shared): persisted so dismissing a
+  // notification survives navigation and backend restarts.
+  isRead          Boolean  @default(false) @map("is_read")
   createdAt       DateTime @default(now()) @map("created_at")
 
   // recipientUserId stored as plain string — no FK so InMemory user IDs work without Neon users row.

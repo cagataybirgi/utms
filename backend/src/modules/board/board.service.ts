@@ -12,6 +12,7 @@ import {
   IIntibakRepository,
 } from "../../shared/repositories";
 import { AuditLogger, NotificationService } from "../../shared/audit";
+import { INotificationStore } from "../notification/notification.store";
 import {
   ConflictError,
   NotFoundError,
@@ -46,7 +47,12 @@ export interface BoardServiceDeps {
   boardStates: IAsyncBoardReviewStateRepository;
   audit: AuditLogger;
   notifications: NotificationService;
+  /** Neon-backed bell notifications (real recipient userIds). */
+  notificationStore: INotificationStore;
 }
+
+const FACULTY_BOARD_ROLE = "FACULTY_BOARD_MEMBER";
+const DEANS_OFFICE_ROLE = "DEANS_OFFICE_STAFF";
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -338,6 +344,15 @@ export class BoardService {
     state.lifecycle = "FORWARDED_TO_BOARD";
     await this.deps.boardStates.save(state);
 
+    // Real bell notification → every Faculty Board member sees the package
+    // now waiting in their review queue.
+    await this.notifyRole(FACULTY_BOARD_ROLE, {
+      eventType: "PACKAGE_FORWARDED_TO_BOARD",
+      channel: "DASHBOARD_ALERT",
+      subject: "Yeni paket kurul incelemesinde",
+      body: `${pkg.departmentId} bölümüne ait paket Dekan imzasıyla Fakülte Kurulu incelemesine açıldı.`,
+    });
+
     this.tokenRegistry.delete(input.token); // single-use
 
     this.deps.audit.write({
@@ -381,7 +396,7 @@ export class BoardService {
     if (!state.deanSignature || state.deanSignature.state !== "valid") {
       throw new ConflictError(
         "SIGNATURE_REQUIRED",
-        "Dekan imzası eksik veya geçersiz (Hata 7C). Karar verilemez.",
+        "Dekan imzası eksik veya geçersiz. Bu paket için karar verilemez.",
       );
     }
 
@@ -392,7 +407,7 @@ export class BoardService {
     ) {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `'${state.lifecycle}' durumundaki bir paket için karar verilemez.`,
+        `"${lifecycleLabel(state.lifecycle)}" durumundaki bir paket için karar verilemez.`,
       );
     }
 
@@ -425,7 +440,7 @@ export class BoardService {
     if (state.lifecycle !== "APPROVED_BY_BOARD") {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `Yayın onayı için paketin 'APPROVED_BY_BOARD' durumunda olması gerekir. Mevcut durum: '${state.lifecycle}'.`,
+        `Yayın onayı için paketin "Kurul Tarafından Onaylandı" durumunda olması gerekir. Mevcut durum: "${lifecycleLabel(state.lifecycle)}".`,
       );
     }
 
@@ -481,7 +496,7 @@ export class BoardService {
     if (state.lifecycle !== "PENDING_BOARD_REVIEW") {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `YGK'ya iade işlemi yalnızca Dekan imzasından önce (PENDING_BOARD_REVIEW durumunda) yapılabilir. Mevcut durum: '${state.lifecycle}'.`,
+        `YGK'ya iade işlemi yalnızca Dekan imzasından önce ("Dekan İmzası Bekleniyor" durumunda) yapılabilir. Mevcut durum: "${lifecycleLabel(state.lifecycle)}".`,
       );
     }
 
@@ -646,6 +661,14 @@ export class BoardService {
       body: input.rejectionReason,
     });
 
+    // Real bell notification → every Dean's Office staff member.
+    await this.notifyRole(DEANS_OFFICE_ROLE, {
+      eventType: "BOARD_REJECTION",
+      channel: "DASHBOARD_ALERT",
+      subject: "Fakülte Kurulu paketi reddetti",
+      body: `${pkg.packageId} paketi kurul tarafından reddedildi ve ${target.toUpperCase()} birimine iade edildi. Gerekçe: ${input.rejectionReason}`,
+    });
+
     const propagation: StatePropagationEvent[] = [
       {
         target: "BoardDashboard",
@@ -705,7 +728,7 @@ export class BoardService {
     if (state.lifecycle !== "READY_FOR_PUBLICATION") {
       throw new ConflictError(
         "INVALID_LIFECYCLE",
-        `Yayınlama için paketin 'READY_FOR_PUBLICATION' durumunda olması gerekir. Mevcut durum: '${state.lifecycle}'.`,
+        `Yayınlama için paketin "Yayına Hazır" durumunda olması gerekir. Mevcut durum: "${lifecycleLabel(state.lifecycle)}".`,
       );
     }
 
@@ -747,6 +770,16 @@ export class BoardService {
       });
       stubs.push(stub);
       if (stub.status === "failed") anyFailed = true;
+      // Real bell notification to the actual student (recipient = studentId).
+      const app = await this.deps.applications.findById(appId);
+      if (app) {
+        await this.notifyUser(app.studentId, {
+          eventType: "RESULT_ADMITTED",
+          channel: "DASHBOARD_ALERT",
+          subject: "Yatay Geçiş Sonucu: Kabul",
+          body: "Tebrikler! Yatay geçiş başvurunuz Fakülte Kurulu tarafından onaylanmıştır. Sonucunuzu panelden görüntüleyebilirsiniz.",
+        });
+      }
     }
     for (const appId of pkg.yedekApplicationIds) {
       const stub = this.dispatchDecoupled(state, {
@@ -758,6 +791,15 @@ export class BoardService {
       });
       stubs.push(stub);
       if (stub.status === "failed") anyFailed = true;
+      const app = await this.deps.applications.findById(appId);
+      if (app) {
+        await this.notifyUser(app.studentId, {
+          eventType: "RESULT_WAITLISTED",
+          channel: "DASHBOARD_ALERT",
+          subject: "Yatay Geçiş Sonucu: Yedek",
+          body: "Yatay geçiş başvurunuzda yedek listesine alındınız. Detayları panelden görüntüleyebilirsiniz.",
+        });
+      }
     }
 
     await this.deps.boardStates.save(state); // persist notification stubs
@@ -824,6 +866,34 @@ export class BoardService {
       };
       state.notifications.push(stub);
       return stub;
+    }
+  }
+
+  /**
+   * Writes a real (Neon-persisted) bell notification to one recipient. Wrapped
+   * so a notification failure never breaks the board action — same decoupling
+   * contract as 571-NOTIFY.
+   */
+  private async notifyUser(
+    recipientUserId: string,
+    params: { eventType: string; channel: "EMAIL" | "DASHBOARD_ALERT"; subject: string; body: string },
+  ): Promise<void> {
+    try {
+      await this.deps.notificationStore.create({ recipientUserId, ...params });
+    } catch {
+      /* decoupled — ignore */
+    }
+  }
+
+  /** Fans a real bell notification out to every user holding `role`. */
+  private async notifyRole(
+    role: string,
+    params: { eventType: string; channel: "EMAIL" | "DASHBOARD_ALERT"; subject: string; body: string },
+  ): Promise<void> {
+    try {
+      await this.deps.notificationStore.createForRole(role, params);
+    } catch {
+      /* decoupled — ignore */
     }
   }
 
@@ -899,4 +969,21 @@ function loopbackToApplicationStatus(target: LoopbackTarget): ApplicationStatus 
     case "ygk":
     default:     return ApplicationStatus.InReviewYgk;
   }
+}
+
+// Human-readable Turkish labels for board lifecycle codes — used in user-facing
+// messages so the UI never leaks internal status identifiers.
+const LIFECYCLE_LABELS: Record<string, string> = {
+  PENDING_BOARD_REVIEW: "Dekan İmzası Bekleniyor",
+  FORWARDED_TO_BOARD: "Kurul İncelemesinde",
+  APPROVED_BY_BOARD: "Kurul Tarafından Onaylandı",
+  READY_FOR_PUBLICATION: "Yayına Hazır",
+  REJECTED_BY_BOARD: "Kurul Tarafından Reddedildi",
+  WAITING_FOR_CLARIFICATION_YGK: "Değerlendirme Komisyonundan Açıklama Bekleniyor",
+  LOCKED_HASH_VIOLATION: "Bütünlük İhlali Nedeniyle Kilitli",
+  PUBLISHED: "Yayınlandı",
+};
+
+function lifecycleLabel(lifecycle: string): string {
+  return LIFECYCLE_LABELS[lifecycle] ?? lifecycle;
 }
