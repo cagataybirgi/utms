@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import JSZip from 'jszip';
 import { AppShell } from '../AppShell';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
@@ -28,6 +29,7 @@ import { PipelineView } from './PipelineView';
 import {
   oidbApi,
   type OidbApplication,
+  type OidbDocument,
   type DocumentSlot,
   DOCUMENT_SLOT_LABELS,
   STATUS_LABELS,
@@ -343,26 +345,57 @@ interface DetailPanelProps {
   onBack: () => void;
 }
 
-// e-Devlet verification is mocked: every uploaded document reports back as
-// "Doğrulandı". The real verification handshake is out of scope here.
-interface ReviewDocument {
+// The checklist shows the standard required slots, annotated with whether the
+// student actually uploaded a file for each (from the live detail endpoint).
+// e-Devlet verification itself stays mocked: an uploaded document is shown as
+// "Doğrulandı". The document *preview*, however, is the real uploaded file.
+interface ChecklistEntry {
   slot: DocumentSlot;
-  size: string;
+  uploaded: boolean;
+  fileName?: string;
+  uploadedAt?: string;
 }
 
-function buildReviewDocuments(app: OidbApplication): ReviewDocument[] {
-  const docs: ReviewDocument[] = [
-    { slot: 'TRANSCRIPT', size: '2.4 MB' },
-    { slot: 'YKS_RESULT', size: '1.8 MB' },
-    { slot: 'STUDENT_CERTIFICATE', size: '1.2 MB' },
-    { slot: 'CURRICULUM', size: '3.2 MB' },
-    { slot: 'COURSE_CONTENTS', size: '5.6 MB' },
+function requiredSlotsFor(app: OidbApplication): DocumentSlot[] {
+  const base: DocumentSlot[] = [
+    'TRANSCRIPT',
+    'YKS_RESULT',
+    'STUDENT_CERTIFICATE',
+    'LANGUAGE_PROOF',
+    'CURRICULUM',
+    'COURSE_CONTENTS',
   ];
-  // Students claiming a language exemption don't upload a language proof.
-  if (!app.ydyoExempt) {
-    docs.push({ slot: 'LANGUAGE_PROOF', size: '2.1 MB' });
+  if ((app.targetDepartmentId ?? '').toLowerCase().includes('arch')) {
+    base.push('PORTFOLIO');
   }
-  return docs;
+  return base;
+}
+
+function buildChecklist(app: OidbApplication, documents: OidbDocument[]): ChecklistEntry[] {
+  const byType = new Map(documents.map((d) => [d.documentType, d]));
+  const slots = requiredSlotsFor(app);
+  // Surface any uploaded document whose slot isn't in the required set too.
+  for (const d of documents) {
+    if (!slots.includes(d.documentType)) slots.push(d.documentType);
+  }
+  return slots.map((slot) => {
+    const doc = byType.get(slot);
+    const version = doc?.versions[doc.versions.length - 1];
+    return {
+      slot,
+      uploaded: version != null,
+      fileName: version?.standardizedFileName,
+      uploadedAt: version?.uploadedAt,
+    };
+  });
+}
+
+type PreviewKind = 'pdf' | 'image' | 'other';
+
+function previewKind(mime: string): PreviewKind {
+  if (mime.includes('pdf')) return 'pdf';
+  if (mime.startsWith('image/')) return 'image';
+  return 'other';
 }
 
 function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
@@ -377,14 +410,87 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
   const [showReject, setShowReject] = useState(false);
   const [justification, setJustification] = useState('');
 
-  const documents = buildReviewDocuments(app);
-  const [selectedSlot, setSelectedSlot] = useState<DocumentSlot>(documents[0].slot);
-  const selectedDoc = documents.find((d) => d.slot === selectedSlot) ?? documents[0];
+  // Live application detail (real uploaded documents).
+  const [documents, setDocuments] = useState<OidbDocument[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(true);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  const [selectedSlot, setSelectedSlot] = useState<DocumentSlot | null>(null);
+
+  // Preview of the actual file behind the selected slot.
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [fileKind, setFileKind] = useState<PreviewKind | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [scale, setScale] = useState(1);
+
+  const checklist = buildChecklist(app, documents);
+  const selectedEntry = checklist.find((c) => c.slot === selectedSlot) ?? null;
 
   const inPool =
     app.currentStatus === 'PENDING_OIDB_VERIFICATION' ||
     app.currentStatus === 'RETURNED_FOR_CORRECTION';
   const isVerified = app.currentStatus === 'INTAKE_VERIFIED';
+
+  // Load the real documents for this application.
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingDetail(true);
+    setDetailError(null);
+    oidbApi
+      .detail(app.applicationId, userId)
+      .then((d) => {
+        if (cancelled) return;
+        setDocuments(d.documents);
+        const entries = buildChecklist(d.application, d.documents);
+        const firstUploaded = entries.find((e) => e.uploaded) ?? entries[0] ?? null;
+        setSelectedSlot(firstUploaded ? firstUploaded.slot : null);
+      })
+      .catch((e) => {
+        if (!cancelled) setDetailError(e instanceof Error ? e.message : 'Belgeler yüklenemedi');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDetail(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [app.applicationId, userId]);
+
+  // Fetch + preview the actual file for the selected slot. The previous object
+  // URL is revoked on every change so blobs don't leak.
+  useEffect(() => {
+    setScale(1);
+    if (!selectedSlot || !selectedEntry?.uploaded) {
+      setFileUrl(null);
+      setFileKind(null);
+      setFileError(null);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setFileLoading(true);
+    setFileError(null);
+    setFileUrl(null);
+    oidbApi
+      .documentFile(app.applicationId, selectedSlot, userId)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setFileUrl(objectUrl);
+        setFileKind(previewKind(blob.type));
+      })
+      .catch((e) => {
+        if (!cancelled) setFileError(e instanceof Error ? e.message : 'Belge görüntülenemedi');
+      })
+      .finally(() => {
+        if (!cancelled) setFileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedSlot, selectedEntry?.uploaded, app.applicationId, userId]);
 
   const run = async (fn: () => Promise<{ application: OidbApplication; message: string }>) => {
     setBusy(true);
@@ -403,11 +509,51 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
     }
   };
 
-  // Pre-select the document slot in the return form when the officer clicks a
-  // specific document in the checklist.
+  // Clicking a document in the checklist previews it and pre-selects its slot in
+  // the return form.
   const selectDocument = (slot: DocumentSlot) => {
     setSelectedSlot(slot);
     setReturnSlot(slot);
+  };
+
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const uploadedCount = checklist.filter((c) => c.uploaded).length;
+
+  // Download every uploaded document for this student as a single zip. Each file
+  // is fetched through the private-blob proxy, bundled client-side with JSZip,
+  // and saved as one archive named after the application.
+  const downloadAllDocuments = async () => {
+    const uploaded = checklist.filter((c) => c.uploaded);
+    if (uploaded.length === 0 || downloadingAll) return;
+    setDownloadingAll(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const zip = new JSZip();
+      const usedNames = new Set<string>();
+      for (const entry of uploaded) {
+        const blob = await oidbApi.documentFile(app.applicationId, entry.slot, userId);
+        // Guard against duplicate file names within the archive.
+        let name = entry.fileName ?? `${entry.slot}`;
+        if (usedNames.has(name)) name = `${entry.slot}_${name}`;
+        usedNames.add(name);
+        zip.file(name, blob);
+      }
+      const archive = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(archive);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${app.applicationId}_belgeler.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setMessage(`${uploaded.length} belge indirildi (zip).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Belgeler indirilemedi');
+    } finally {
+      setDownloadingAll(false);
+    }
   };
 
   return (
@@ -590,91 +736,152 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
           </Card>
 
           <Card className="p-4">
-            <h3 className="text-sm font-bold mb-3 border-b pb-2">Belge Kontrol Listesi</h3>
-            <div className="space-y-2">
-              {documents.map((doc) => {
-                const active = selectedSlot === doc.slot;
-                return (
-                  <div
-                    key={doc.slot}
-                    className={`p-2 rounded-lg border cursor-pointer transition-colors ${active ? 'border-[#C00000] bg-red-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}
-                    onClick={() => selectDocument(doc.slot)}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center space-x-2">
-                        <FileText className={`w-4 h-4 ${active ? 'text-[#C00000]' : 'text-gray-400'}`} />
-                        <span className="text-[11px] font-medium">{DOCUMENT_SLOT_LABELS[doc.slot]}</span>
-                      </div>
-                      <Badge className="bg-green-600 hover:bg-green-700 text-white border-none text-[10px]">
-                        e-Devlet: Doğrulandı
-                      </Badge>
-                    </div>
-                    <div className="flex items-center justify-between text-[10px] text-gray-500">
-                      <span>Boyut: {doc.size}</span>
-                      <span className="flex items-center italic">
-                        <CheckCircle2 className="w-3 h-3 mr-1 text-green-600" />
-                        Doğrulandı
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="flex items-center justify-between mb-3 border-b pb-2">
+              <h3 className="text-sm font-bold">Belge Kontrol Listesi</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] px-2"
+                disabled={loadingDetail || uploadedCount === 0 || downloadingAll}
+                onClick={downloadAllDocuments}
+              >
+                {downloadingAll ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 mr-1 animate-spin" />
+                    İndiriliyor…
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5 mr-1" />
+                    Tüm Belgeleri İndir{uploadedCount > 0 ? ` (${uploadedCount})` : ''}
+                  </>
+                )}
+              </Button>
             </div>
+            {loadingDetail ? (
+              <div className="py-6 text-center text-xs text-gray-500">Belgeler yükleniyor…</div>
+            ) : detailError ? (
+              <div className="py-3 text-xs text-red-700">{detailError}</div>
+            ) : checklist.length === 0 ? (
+              <div className="py-6 text-center text-xs text-gray-500">Belge bulunamadı.</div>
+            ) : (
+              <div className="space-y-2">
+                {checklist.map((doc) => {
+                  const active = selectedSlot === doc.slot;
+                  return (
+                    <div
+                      key={doc.slot}
+                      className={`p-2 rounded-lg border cursor-pointer transition-colors ${active ? 'border-[#C00000] bg-red-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                      onClick={() => selectDocument(doc.slot)}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center space-x-2">
+                          <FileText className={`w-4 h-4 ${active ? 'text-[#C00000]' : 'text-gray-400'}`} />
+                          <span className="text-[11px] font-medium">{DOCUMENT_SLOT_LABELS[doc.slot]}</span>
+                        </div>
+                        {doc.uploaded ? (
+                          <Badge className="bg-green-600 hover:bg-green-700 text-white border-none text-[10px]">
+                            e-Devlet: Doğrulandı
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-gray-200 text-gray-600 border-none text-[10px]">Yüklenmedi</Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-gray-500">
+                        <span className="truncate max-w-[60%]">{doc.fileName ?? 'Belge yüklenmedi'}</span>
+                        {doc.uploaded ? (
+                          <span className="flex items-center italic">
+                            <CheckCircle2 className="w-3 h-3 mr-1 text-green-600" />
+                            Doğrulandı
+                          </span>
+                        ) : (
+                          <span className="flex items-center italic text-gray-400">
+                            <AlertTriangle className="w-3 h-3 mr-1 text-gray-400" />
+                            Eksik
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
         </div>
 
-        {/* Right: document viewer */}
+        {/* Right: document viewer — the real uploaded file */}
         <Card className="flex flex-col overflow-hidden p-0 min-h-[480px]">
           <div className="bg-gray-800 text-white p-2 text-xs flex justify-between items-center shrink-0">
-            <span>Görüntülenen: {DOCUMENT_SLOT_LABELS[selectedDoc.slot]}</span>
+            <span className="truncate">
+              Görüntülenen: {selectedSlot ? DOCUMENT_SLOT_LABELS[selectedSlot] : 'Belge seçilmedi'}
+            </span>
             <div className="flex space-x-2">
-              <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2"><ZoomIn className="w-3 h-3 mr-1" />Yakınlaştır</Button>
-              <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2"><ZoomOut className="w-3 h-3 mr-1" />Uzaklaştır</Button>
-              <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2"><Download className="w-3 h-3 mr-1" />İndir</Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-6 text-[10px] py-0 px-2"
+                disabled={!fileUrl}
+                onClick={() => setScale((s) => Math.min(2.5, s + 0.25))}
+              >
+                <ZoomIn className="w-3 h-3 mr-1" />Yakınlaştır
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-6 text-[10px] py-0 px-2"
+                disabled={!fileUrl}
+                onClick={() => setScale((s) => Math.max(0.5, s - 0.25))}
+              >
+                <ZoomOut className="w-3 h-3 mr-1" />Uzaklaştır
+              </Button>
+              {fileUrl ? (
+                <a href={fileUrl} download={selectedEntry?.fileName ?? 'belge'}>
+                  <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2">
+                    <Download className="w-3 h-3 mr-1" />İndir
+                  </Button>
+                </a>
+              ) : (
+                <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2" disabled>
+                  <Download className="w-3 h-3 mr-1" />İndir
+                </Button>
+              )}
             </div>
           </div>
-          <div className="flex-1 flex items-center justify-center p-6 bg-gray-200 overflow-auto">
-            <div className="w-full max-w-[460px] aspect-[1/1.414] bg-white shadow-2xl flex flex-col p-8 shrink-0">
-              <div className="border-b-2 border-gray-900 pb-3 mb-6 flex justify-between items-start">
-                <div>
-                  <h2 className="text-base font-serif font-bold uppercase">{DOCUMENT_SLOT_LABELS[selectedDoc.slot]}</h2>
-                  <p className="text-[11px] font-serif">Üniversite Transfer Başvuru Belgesi</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-serif font-bold">TARİH: {formatDate(app.submittedAt)}</p>
-                  <p className="text-[10px] font-serif font-bold">BAŞVURU: {app.applicationId}</p>
-                </div>
+          <div className="flex-1 flex items-center justify-center p-4 bg-gray-200 overflow-auto">
+            {!selectedSlot || !selectedEntry?.uploaded ? (
+              <div className="text-center text-gray-500 text-sm px-6">
+                <FileText className="w-10 h-10 mx-auto mb-2 text-gray-400" />
+                Bu belge öğrenci tarafından yüklenmemiş.
               </div>
-              <div className="flex-1 space-y-5">
-                <div className="h-3 bg-gray-100 w-3/4" />
-                <div className="h-3 bg-gray-100 w-1/2" />
-                <div className="h-24 bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 font-serif italic text-xs text-center px-2">
-                  {DOCUMENT_SLOT_LABELS[selectedDoc.slot]} için belge önizleme içeriği
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="h-2.5 bg-gray-100 w-full" />
-                    <div className="h-2.5 bg-gray-100 w-full" />
-                    <div className="h-2.5 bg-gray-100 w-full" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="h-2.5 bg-gray-100 w-full" />
-                    <div className="h-2.5 bg-gray-100 w-full" />
-                    <div className="h-2.5 bg-gray-100 w-full" />
-                  </div>
-                </div>
-                <div className="flex justify-end pt-4">
-                  <div className="w-24 h-24 border-2 border-blue-900 rounded-full flex items-center justify-center border-double rotate-12">
-                    <div className="text-center text-blue-900 font-bold text-[9px] leading-tight">
-                      e-DEVLET<br />DOĞRULANDI<br />{formatDate(app.submittedAt)}
-                    </div>
-                  </div>
-                </div>
+            ) : fileLoading ? (
+              <div className="text-sm text-gray-500">Belge yükleniyor…</div>
+            ) : fileError ? (
+              <div className="text-center text-sm text-red-700 px-6">
+                <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-red-500" />
+                {fileError}
               </div>
-              <div className="mt-auto pt-4 border-t border-gray-200 text-[8px] text-gray-400 uppercase tracking-widest text-center">
-                Bu belge güvenli bağlantı üzerinden merkezi üniversite yönetim sisteminden çekilmiştir.
+            ) : fileUrl && fileKind === 'pdf' ? (
+              <iframe
+                title={selectedEntry.fileName ?? 'Belge'}
+                src={fileUrl}
+                className="w-full h-full min-h-[460px] bg-white shadow-lg border-0"
+                style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}
+              />
+            ) : fileUrl && fileKind === 'image' ? (
+              <img
+                alt={selectedEntry.fileName ?? 'Belge'}
+                src={fileUrl}
+                className="max-w-full max-h-full object-contain bg-white shadow-lg"
+                style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}
+              />
+            ) : fileUrl ? (
+              <div className="text-center text-sm text-gray-600 px-6">
+                Bu belge tarayıcıda önizlenemiyor.
+                <a href={fileUrl} download={selectedEntry.fileName ?? 'belge'} className="block mt-2 text-blue-700 underline">
+                  Belgeyi indir
+                </a>
               </div>
-            </div>
+            ) : null}
           </div>
         </Card>
       </div>

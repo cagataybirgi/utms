@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import { OidbService } from "./oidb.service";
+import { OidbDocumentsService } from "./oidb-documents.service";
 import { DocumentType } from "../../shared/types";
 import { UnauthorizedError } from "../../shared/errors";
 
@@ -24,7 +25,10 @@ const ForwardSchema = z.object({
 });
 
 export class OidbController {
-  constructor(private readonly service: OidbService) {}
+  constructor(
+    private readonly service: OidbService,
+    private readonly documents: OidbDocumentsService,
+  ) {}
 
   listPool = async (_req: Request, res: Response): Promise<void> => {
     const pool = await this.service.listPool();
@@ -35,6 +39,14 @@ export class OidbController {
     const { applicationId } = req.params;
     const detail = await this.service.loadDetail(applicationId);
     res.json(detail);
+  };
+
+  getDocumentFile = async (req: Request, res: Response): Promise<void> => {
+    const { applicationId, documentType } = req.params;
+    const file = await this.documents.fetchFile(applicationId, documentType);
+    res.setHeader("Content-Type", file.contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${file.fileName}"`);
+    res.send(file.buffer);
   };
 
   verify = async (req: Request, res: Response): Promise<void> => {

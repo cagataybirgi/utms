@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { OidbController } from "./oidb.controller";
 import { OidbService } from "./oidb.service";
+import { OidbDocumentsService } from "./oidb-documents.service";
 import { AppContainer } from "../../shared/container";
 import { AuditLogger, NotificationService } from "../../shared/audit";
 import { requireRoles } from "../../shared/middleware/rbac";
@@ -39,13 +40,17 @@ export function buildOidbRouter(container: AppContainer): Router {
     audit,
     notifications,
   });
-  const controller = new OidbController(service);
+  const controller = new OidbController(service, new OidbDocumentsService());
 
   const r = Router();
   r.use(requireRoles(UserRole.OidbOfficer, UserRole.SystemAdmin));
 
   r.get("/applications", asyncHandler(controller.listPool));
   r.get("/applications/:applicationId", asyncHandler(controller.getDetail));
+  r.get(
+    "/applications/:applicationId/documents/:documentType/file",
+    asyncHandler(controller.getDocumentFile),
+  );
   r.post("/applications/:applicationId/verify", asyncHandler(controller.verify));
   r.post("/applications/:applicationId/return", asyncHandler(controller.returnForCorrection));
   r.post("/applications/:applicationId/reject", asyncHandler(controller.reject));

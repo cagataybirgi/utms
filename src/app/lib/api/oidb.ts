@@ -114,9 +114,70 @@ export interface CorrectionReason {
   reason: string;
 }
 
+export interface OidbDocumentVersion {
+  versionId: string;
+  versionNumber: number;
+  standardizedFileName: string;
+  storageKey: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  hasBarcode: boolean;
+  isCorrupt?: boolean;
+}
+
+export interface OidbDocument {
+  documentId: string;
+  applicationId: string;
+  documentType: DocumentSlot;
+  versions: OidbDocumentVersion[];
+}
+
+export interface DocumentVerification {
+  documentId: string;
+  documentType: DocumentSlot;
+  badge: string;
+  message?: string;
+}
+
+export interface OidbApplicationDetail {
+  application: OidbApplication;
+  documents: OidbDocument[];
+  verifications: DocumentVerification[];
+}
+
 export async function fetchOidbQueue(userId: string): Promise<{ items: OidbApplication[]; count: number }> {
   const res = await fetch(`${BASE}/applications`, { headers: authHeaders(userId) });
   return handle(res);
+}
+
+export async function fetchOidbDetail(
+  applicationId: string,
+  userId: string,
+): Promise<OidbApplicationDetail> {
+  const res = await fetch(`${BASE}/applications/${applicationId}`, { headers: authHeaders(userId) });
+  return handle(res);
+}
+
+/**
+ * Fetches the actual uploaded file for one document slot. The backend proxies
+ * the private blob, so the body comes back as a Blob we can preview via an
+ * object URL. Auth travels in the x-mock-user header, which is why this can't be
+ * a plain <iframe src>.
+ */
+export async function fetchOidbDocumentFile(
+  applicationId: string,
+  documentType: DocumentSlot,
+  userId: string,
+): Promise<Blob> {
+  const res = await fetch(
+    `${BASE}/applications/${applicationId}/documents/${documentType}/file`,
+    { headers: authHeaders(userId) },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new OidbApiError(body.message ?? `HTTP ${res.status}`, res.status, body.error);
+  }
+  return res.blob();
 }
 
 export async function verifyApplication(
@@ -172,6 +233,8 @@ export async function forwardApplication(
 
 export const oidbApi = {
   queue: fetchOidbQueue,
+  detail: fetchOidbDetail,
+  documentFile: fetchOidbDocumentFile,
   verify: verifyApplication,
   returnForCorrection,
   reject: rejectApplication,
