@@ -24,6 +24,9 @@ import {
   Download,
   Database,
   ServerCrash,
+  ShieldCheck,
+  ShieldAlert,
+  BadgeCheck,
 } from 'lucide-react';
 import type { User } from '../../App';
 import { ReviewAppeals } from './ReviewAppeals';
@@ -72,6 +75,7 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [simulateDown, setSimulateDown] = useState(isSimulatingDocStoreDown());
+  const [edevletDown, setEdevletDown] = useState(false);
 
   const toggleDocStoreDown = () => {
     const next = !simulateDown;
@@ -111,6 +115,8 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
         <OidbDetailPanel
           app={selected}
           userId={user.id}
+          userName={`${user.name} ${user.surname}`.trim()}
+          edevletDown={edevletDown}
           onUpdated={(updated) => setSelected(updated)}
           onBack={backToDashboard}
         />
@@ -162,6 +168,23 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
             <p className="text-gray-600">Öğrenci İşleri Daire Başkanlığı - Başvuru Yönetimi</p>
           </div>
           <div className="flex items-center gap-2">
+            {/* e-Devlet API down — documents require manual verification */}
+            <button
+              type="button"
+              onClick={() => setEdevletDown((v) => !v)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+                edevletDown
+                  ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+                  : 'bg-gray-50 border-gray-300 text-gray-500 hover:bg-gray-100'
+              }`}
+              title="e-Devlet doğrulama servisinin çevrimdışı olduğu senaryoyu simüle eder"
+            >
+              {edevletDown ? (
+                <><ShieldAlert className="w-3.5 h-3.5" /> e-Devlet: ARIZALI</>
+              ) : (
+                <><ShieldCheck className="w-3.5 h-3.5" /> e-Devlet: ÇALIŞIYOR</>
+              )}
+            </button>
             {/* Test Case 4 — simulate the document store being offline */}
             <button
               type="button"
@@ -185,6 +208,17 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
             </Button>
           </div>
         </div>
+        {edevletDown && (
+          <Card className="p-3 border-amber-200 bg-amber-50">
+            <div className="flex items-center gap-2 text-amber-800 text-sm">
+              <ShieldAlert className="w-4 h-4" />
+              <span>
+                e-Devlet doğrulama servisi <strong>ARIZALI</strong>. Belgeler otomatik doğrulanmaz; her belge
+                ÖİDB memuru tarafından elle doğrulanmalı, aksi halde başvuru onaylanamaz.
+              </span>
+            </div>
+          </Card>
+        )}
         {simulateDown && (
           <Card className="p-3 border-red-200 bg-red-50">
             <div className="flex items-center gap-2 text-red-700 text-sm">
@@ -382,6 +416,8 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
 interface DetailPanelProps {
   app: OidbApplication;
   userId: string;
+  userName: string;
+  edevletDown: boolean;
   onUpdated: (app: OidbApplication) => void;
   onBack: () => void;
 }
@@ -439,10 +475,15 @@ function previewKind(mime: string): PreviewKind {
   return 'other';
 }
 
-function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
+function OidbDetailPanel({ app, userId, userName, edevletDown, onUpdated, onBack }: DetailPanelProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Per-document manual verification by the ÖİDB officer (this session). When
+  // e-Devlet is down nothing is auto-verified, so the officer must verify each
+  // document by hand before the application can be approved.
+  const [manualVerified, setManualVerified] = useState<Record<string, string>>({});
 
   const [showReturn, setShowReturn] = useState(false);
   const [returnSlot, setReturnSlot] = useState<DocumentSlot>('TRANSCRIPT');
@@ -560,6 +601,17 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
   const [downloadingAll, setDownloadingAll] = useState(false);
   const uploadedCount = checklist.filter((c) => c.uploaded).length;
 
+  const markDocumentVerified = (slot: DocumentSlot) => {
+    setManualVerified((prev) => ({ ...prev, [slot]: userName }));
+  };
+
+  // When e-Devlet is down, completing the ÖİDB verification is blocked until every
+  // uploaded document has been verified by hand.
+  const pendingManual = edevletDown
+    ? checklist.filter((c) => c.uploaded && !manualVerified[c.slot])
+    : [];
+  const verifyBlocked = edevletDown && pendingManual.length > 0;
+
   // Download every uploaded document for this student as a single zip. Each file
   // is fetched through the private-blob proxy, bundled client-side with JSZip,
   // and saved as one archive named after the application.
@@ -644,19 +696,31 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
 
         {/* Actions for pool applications */}
         {!detailError && inPool && (
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={() => run(() => oidbApi.verify(app.applicationId, userId))} disabled={busy}>
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Doğrula (Onayla)
-            </Button>
-            <Button variant="outline" onClick={() => { setShowReturn((v) => !v); setShowReject(false); }} disabled={busy}>
-              <XCircle className="w-4 h-4 mr-2" />
-              Düzeltme İçin İade Et
-            </Button>
-            <Button variant="outline" className="text-red-600 border-red-300" onClick={() => { setShowReject((v) => !v); setShowReturn(false); }} disabled={busy}>
-              <AlertTriangle className="w-4 h-4 mr-2" />
-              Reddet
-            </Button>
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-3">
+              <Button
+                onClick={() => run(() => oidbApi.verify(app.applicationId, userId))}
+                disabled={busy || verifyBlocked}
+                title={verifyBlocked ? 'Tüm belgeler elle doğrulanmadan başvuru onaylanamaz' : undefined}
+              >
+                <CheckCircle2 className="w-4 h-4 mr-2" />
+                Doğrula (Onayla)
+              </Button>
+              <Button variant="outline" onClick={() => { setShowReturn((v) => !v); setShowReject(false); }} disabled={busy}>
+                <XCircle className="w-4 h-4 mr-2" />
+                Düzeltme İçin İade Et
+              </Button>
+              <Button variant="outline" className="text-red-600 border-red-300" onClick={() => { setShowReject((v) => !v); setShowReturn(false); }} disabled={busy}>
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Reddet
+              </Button>
+            </div>
+            {verifyBlocked && (
+              <div className="text-xs text-amber-700 flex items-center gap-1">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                e-Devlet arızalı: {pendingManual.length} belge elle doğrulanmayı bekliyor. Tümü doğrulanmadan başvuru onaylanamaz.
+              </div>
+            )}
           </div>
         )}
 
@@ -822,6 +886,7 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
               <div className="space-y-2">
                 {checklist.map((doc) => {
                   const active = selectedSlot === doc.slot;
+                  const verifiedBy = manualVerified[doc.slot];
                   return (
                     <div
                       key={doc.slot}
@@ -833,25 +898,49 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
                           <FileText className={`w-4 h-4 ${active ? 'text-[#C00000]' : 'text-gray-400'}`} />
                           <span className="text-[11px] font-medium">{DOCUMENT_SLOT_LABELS[doc.slot]}</span>
                         </div>
-                        {doc.uploaded ? (
+                        {!doc.uploaded ? (
+                          <Badge className="bg-gray-200 text-gray-600 border-none text-[10px]">Yüklenmedi</Badge>
+                        ) : verifiedBy ? (
                           <Badge className="bg-green-600 hover:bg-green-700 text-white border-none text-[10px]">
-                            e-Devlet: Doğrulandı
+                            Doğrulandı (elle)
+                          </Badge>
+                        ) : edevletDown ? (
+                          <Badge className="bg-amber-500 hover:bg-amber-600 text-white border-none text-[10px]">
+                            Doğrulanmadı
                           </Badge>
                         ) : (
-                          <Badge className="bg-gray-200 text-gray-600 border-none text-[10px]">Yüklenmedi</Badge>
+                          <Badge className="bg-blue-600 hover:bg-blue-700 text-white border-none text-[10px]">
+                            e-Devlet: Doğrulandı
+                          </Badge>
                         )}
                       </div>
-                      <div className="flex items-center justify-between text-[10px] text-gray-500">
-                        <span className="truncate max-w-[60%]">{doc.fileName ?? 'Belge yüklenmedi'}</span>
-                        {doc.uploaded ? (
-                          <span className="flex items-center italic">
-                            <CheckCircle2 className="w-3 h-3 mr-1 text-green-600" />
-                            Doğrulandı
-                          </span>
-                        ) : (
+                      <div className="flex items-center justify-between text-[10px] text-gray-500 gap-2">
+                        <span className="truncate max-w-[50%]">{doc.fileName ?? 'Belge yüklenmedi'}</span>
+                        {!doc.uploaded ? (
                           <span className="flex items-center italic text-gray-400">
                             <AlertTriangle className="w-3 h-3 mr-1 text-gray-400" />
                             Eksik
+                          </span>
+                        ) : verifiedBy ? (
+                          <span className="flex items-center italic text-green-700 truncate">
+                            <BadgeCheck className="w-3 h-3 mr-1 shrink-0 text-green-600" />
+                            Doğrulayan: {verifiedBy}
+                          </span>
+                        ) : edevletDown ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              markDocumentVerified(doc.slot);
+                            }}
+                            className="flex items-center gap-1 text-amber-700 border border-amber-300 rounded px-1.5 py-0.5 hover:bg-amber-50 shrink-0"
+                          >
+                            <ShieldCheck className="w-3 h-3" /> Elle Doğrula
+                          </button>
+                        ) : (
+                          <span className="flex items-center italic text-blue-700">
+                            <CheckCircle2 className="w-3 h-3 mr-1 text-blue-600" />
+                            Otomatik doğrulandı (mock)
                           </span>
                         )}
                       </div>
@@ -866,8 +955,23 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
         {/* Right: document viewer — the real uploaded file */}
         <Card className="flex flex-col overflow-hidden p-0 min-h-[480px]">
           <div className="bg-gray-800 text-white p-2 text-xs flex justify-between items-center shrink-0">
-            <span className="truncate">
+            <span className="truncate flex items-center gap-2">
               Görüntülenen: {selectedSlot ? DOCUMENT_SLOT_LABELS[selectedSlot] : 'Belge seçilmedi'}
+              {selectedSlot && selectedEntry?.uploaded && (
+                manualVerified[selectedSlot] ? (
+                  <span className="inline-flex items-center gap-1 text-green-300">
+                    <BadgeCheck className="w-3 h-3" /> Doğrulayan: {manualVerified[selectedSlot]}
+                  </span>
+                ) : edevletDown ? (
+                  <span className="inline-flex items-center gap-1 text-amber-300">
+                    <ShieldAlert className="w-3 h-3" /> Doğrulanmadı
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-blue-300">
+                    <ShieldCheck className="w-3 h-3" /> e-Devlet doğrulandı (mock)
+                  </span>
+                )
+              )}
             </span>
             <div className="flex space-x-2">
               <Button
