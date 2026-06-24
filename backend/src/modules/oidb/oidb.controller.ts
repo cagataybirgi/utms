@@ -3,7 +3,7 @@ import { z } from "zod";
 import { OidbService } from "./oidb.service";
 import { OidbDocumentsService } from "./oidb-documents.service";
 import { DocumentType } from "../../shared/types";
-import { UnauthorizedError } from "../../shared/errors";
+import { ServiceUnavailableError, UnauthorizedError } from "../../shared/errors";
 
 const ReturnSchema = z.object({
   reasons: z
@@ -36,6 +36,7 @@ export class OidbController {
   };
 
   getDetail = async (req: Request, res: Response): Promise<void> => {
+    this.assertDocumentStoreUp(req, "Document can not find. Action blocked, review halted.");
     const { applicationId } = req.params;
     const detail = await this.service.loadDetail(applicationId);
     res.json(detail);
@@ -50,44 +51,58 @@ export class OidbController {
   };
 
   verify = async (req: Request, res: Response): Promise<void> => {
+    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const updated = await this.service.verify(applicationId, userId);
-    res.json({ application: updated, message: "Application status updated to INTAKE_VERIFIED" });
+    res.json({ application: updated, message: "Başvuru durumu güncellendi: ÖİDB Onaylı" });
   };
 
   returnForCorrection = async (req: Request, res: Response): Promise<void> => {
+    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = ReturnSchema.parse(req.body);
     const updated = await this.service.returnForCorrection(applicationId, userId, body);
     res.json({
       application: updated,
-      message: "The action is successfully submitted.",
+      message: "Başvuru düzeltme için öğrenciye iade edildi.",
     });
   };
 
   reject = async (req: Request, res: Response): Promise<void> => {
+    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = RejectSchema.parse(req.body);
     const updated = await this.service.reject(applicationId, userId, body);
-    res.json({ application: updated, message: "Application permanently closed (rejected)." });
+    res.json({ application: updated, message: "Başvuru kalıcı olarak reddedildi." });
   };
 
   forward = async (req: Request, res: Response): Promise<void> => {
+    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = ForwardSchema.parse(req.body ?? {});
     const updated = await this.service.forward(applicationId, userId, body);
     res.json({
       application: updated,
-      message: "Application forwarded; status: PENDING_YGK_FORWARDING",
+      message: "Başvuru iletildi. Durum: YGK İletimi Bekliyor.",
     });
   };
 
   private requireUser(req: Request): string {
     if (!req.authUser) throw new UnauthorizedError();
     return req.authUser.userId;
+  }
+
+  // Demo/test hook: the ÖİDB panel can simulate the document store being offline
+  // (Test Case 4 — DocumentStoreUnreachable) by sending this header. The review
+  // is halted before any read or mutation runs, so application status is left
+  // untouched — the same 503 the in-memory store produces under test.
+  private assertDocumentStoreUp(req: Request, message: string): void {
+    if (req.header("x-simulate-docstore-down") === "1") {
+      throw new ServiceUnavailableError("DOCUMENT_STORE_UNREACHABLE", message);
+    }
   }
 }

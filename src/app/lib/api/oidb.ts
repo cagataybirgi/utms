@@ -13,8 +13,23 @@ export class OidbApiError extends Error {
   }
 }
 
-function authHeaders(userId: string): HeadersInit {
-  return { 'x-mock-user': userId };
+// Test Case 4 — DocumentStoreUnreachable simulation. When on, every ÖİDB request
+// carries a header the backend honours by returning the document-store 503. The
+// queue endpoint ignores it, so the pool still loads with statuses unchanged.
+let simulateDocStoreDown = false;
+
+export function setSimulateDocStoreDown(value: boolean): void {
+  simulateDocStoreDown = value;
+}
+
+export function isSimulatingDocStoreDown(): boolean {
+  return simulateDocStoreDown;
+}
+
+function authHeaders(userId: string): Record<string, string> {
+  const headers: Record<string, string> = { 'x-mock-user': userId };
+  if (simulateDocStoreDown) headers['x-simulate-docstore-down'] = '1';
+  return headers;
 }
 
 async function handle<T>(res: Response): Promise<T> {
@@ -45,7 +60,7 @@ export const DOCUMENT_SLOT_LABELS: Record<DocumentSlot, string> = {
 export const STATUS_LABELS: Record<string, string> = {
   PENDING_OIDB_VERIFICATION: 'Onay Bekliyor',
   RETURNED_FOR_CORRECTION: 'Düzeltme İçin İade Edildi',
-  INTAKE_VERIFIED: 'Onaylandı',
+  INTAKE_VERIFIED: 'ÖİDB Onaylı',
   IN_REVIEW_YDYO: 'YDYO İncelemesinde',
   PENDING_YGK_FORWARDING: 'YGK İletimi Bekliyor',
   REJECTED_AT_INTAKE: 'Reddedildi',

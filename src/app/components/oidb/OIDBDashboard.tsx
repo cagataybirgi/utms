@@ -22,6 +22,8 @@ import {
   ZoomIn,
   ZoomOut,
   Download,
+  Database,
+  ServerCrash,
 } from 'lucide-react';
 import type { User } from '../../App';
 import { ReviewAppeals } from './ReviewAppeals';
@@ -37,6 +39,8 @@ import {
   facultyLabel,
   maskTckn,
   formatDate,
+  setSimulateDocStoreDown,
+  isSimulatingDocStoreDown,
 } from '../../lib/api/oidb';
 
 interface OIDBDashboardProps {
@@ -67,6 +71,13 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
   const [items, setItems] = useState<OidbApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [simulateDown, setSimulateDown] = useState(isSimulatingDocStoreDown());
+
+  const toggleDocStoreDown = () => {
+    const next = !simulateDown;
+    setSimulateDocStoreDown(next);
+    setSimulateDown(next);
+  };
 
   const loadQueue = useCallback(() => {
     setLoading(true);
@@ -150,11 +161,41 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
             <h1 className="text-gray-900 mb-2">ÖİDB Memur Paneli</h1>
             <p className="text-gray-600">Öğrenci İşleri Daire Başkanlığı - Başvuru Yönetimi</p>
           </div>
-          <Button variant="outline" size="sm" onClick={loadQueue} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Yenile
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Test Case 4 — simulate the document store being offline */}
+            <button
+              type="button"
+              onClick={toggleDocStoreDown}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+                simulateDown
+                  ? 'bg-red-50 border-red-300 text-red-700 hover:bg-red-100'
+                  : 'bg-gray-50 border-gray-300 text-gray-500 hover:bg-gray-100'
+              }`}
+              title="Belge sunucusunun çevrimdışı olduğu senaryoyu simüle eder"
+            >
+              {simulateDown ? (
+                <><ServerCrash className="w-3.5 h-3.5" /> Belge Sunucusu: ARIZALI</>
+              ) : (
+                <><Database className="w-3.5 h-3.5" /> Belge Sunucusu: ÇALIŞIYOR</>
+              )}
+            </button>
+            <Button variant="outline" size="sm" onClick={loadQueue} disabled={loading}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Yenile
+            </Button>
+          </div>
         </div>
+        {simulateDown && (
+          <Card className="p-3 border-red-200 bg-red-50">
+            <div className="flex items-center gap-2 text-red-700 text-sm">
+              <ServerCrash className="w-4 h-4" />
+              <span>
+                Belge sunucusu arıza simülasyonu <strong>AÇIK</strong>. Bir başvuru açıldığında inceleme
+                durdurulacak ve işlemler engellenecektir.
+              </span>
+            </div>
+          </Card>
+        )}
 
         {error && (
           <Card className="p-4 border-red-200 bg-red-50">
@@ -588,8 +629,21 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
           <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-800">{error}</div>
         )}
 
+        {/* Document store down — review halted, every action blocked */}
+        {detailError && (
+          <div className="rounded-md bg-red-100 border border-red-300 p-4 text-sm text-red-800 flex items-start gap-2">
+            <ServerCrash className="w-5 h-5 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-semibold">{detailError}</div>
+              <div className="mt-1 text-red-700">
+                Belge sunucusuna ulaşılamadığı için inceleme durduruldu. Bu başvuru üzerinde işlem yapılamaz.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Actions for pool applications */}
-        {inPool && (
+        {!detailError && inPool && (
           <div className="flex flex-wrap gap-3">
             <Button onClick={() => run(() => oidbApi.verify(app.applicationId, userId))} disabled={busy}>
               <CheckCircle2 className="w-4 h-4 mr-2" />
@@ -606,7 +660,7 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
           </div>
         )}
 
-        {showReturn && (
+        {!detailError && showReturn && (
           <div className="rounded-md border border-gray-200 p-4 space-y-3">
             <div className="text-sm text-gray-700">Düzeltme istenen belge ve gerekçe:</div>
             <div className="flex flex-col md:flex-row gap-3">
@@ -656,7 +710,7 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
         )}
 
         {/* Forward actions once verified */}
-        {isVerified && (
+        {!detailError && isVerified && (
           <div className="space-y-3">
             <div className="text-sm text-gray-700">Başvuru onaylandı. Yönlendirme seçin:</div>
             <div className="flex flex-wrap gap-3">
@@ -672,7 +726,7 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
           </div>
         )}
 
-        {!inPool && !isVerified && (
+        {!detailError && !inPool && !isVerified && (
           <div className="text-sm text-gray-500">
             Bu başvuru için ÖİDB aşamasında yapılabilecek işlem yok (durum: {STATUS_LABELS[app.currentStatus] ?? app.currentStatus}).
           </div>
