@@ -8,25 +8,32 @@ import { UserRole } from "../../shared/types";
 import { asyncHandler } from "../../shared/middleware/async-handler";
 import {
   IAsyncApplicationRepository,
+  IAsyncDocumentRepository,
   InMemoryAsyncApplicationRepository,
+  InMemoryAsyncDocumentRepository,
   PrismaApplicationRepository,
+  PrismaDocumentRepository,
 } from "../../shared/repositories";
 
 export function buildOidbRouter(container: AppContainer): Router {
   const audit = new AuditLogger(container.audit);
   const notifications = new NotificationService(container.notifications);
 
-  // Runtime reads/writes applications from Neon (Prisma) so the ÖİDB pool sees
-  // live student submissions and Dean → ÖİDB returns, which are all persisted
-  // there. Tests use the in-memory container (NODE_ENV=test).
+  // Runtime reads/writes applications AND documents from Neon (Prisma) so the
+  // ÖİDB pool sees live student submissions and Dean → ÖİDB returns, and the
+  // detail view shows documents a live student actually uploaded. Tests use the
+  // in-memory container (NODE_ENV=test).
   const useDatabase = process.env.NODE_ENV !== "test";
   const applications: IAsyncApplicationRepository = useDatabase
     ? new PrismaApplicationRepository()
     : new InMemoryAsyncApplicationRepository(container.applications);
+  const documents: IAsyncDocumentRepository = useDatabase
+    ? new PrismaDocumentRepository()
+    : new InMemoryAsyncDocumentRepository(container.documents);
 
   const service = new OidbService({
     applications,
-    documents: container.documents,
+    documents,
     users: container.users,
     edevlet: container.edevlet,
     audit,

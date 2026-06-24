@@ -739,15 +739,20 @@ function makeDoc(applicationId: string, type: DocumentType, hasBarcode: boolean,
   };
 }
 
-function seedDocuments(c: AppContainer): void {
+// Single source of truth for seeded documents — used by the in-memory container
+// AND by prisma/seed.ts so a live OIDB/YDYO officer sees the same document rows
+// in Neon as the test fixtures.
+export function buildSeedDocuments(): Document[] {
+  const docs: Document[] = [];
+
   const oidbApps = ["app-1001", "app-1002", "app-1003", "app-1004"];
   for (const appId of oidbApps) {
-    c.documents.put(makeDoc(appId, DocumentType.Transcript, true));
-    c.documents.put(makeDoc(appId, DocumentType.YksResult, true));
-    c.documents.put(makeDoc(appId, DocumentType.StudentCertificate, true));
-    c.documents.put(makeDoc(appId, DocumentType.LanguageProof, false));
-    c.documents.put(makeDoc(appId, DocumentType.Curriculum, false));
-    c.documents.put(makeDoc(appId, DocumentType.CourseContents, false));
+    docs.push(makeDoc(appId, DocumentType.Transcript, true));
+    docs.push(makeDoc(appId, DocumentType.YksResult, true));
+    docs.push(makeDoc(appId, DocumentType.StudentCertificate, true));
+    docs.push(makeDoc(appId, DocumentType.LanguageProof, false));
+    docs.push(makeDoc(appId, DocumentType.Curriculum, false));
+    docs.push(makeDoc(appId, DocumentType.CourseContents, false));
   }
 
   const intibakApps = [
@@ -765,13 +770,19 @@ function seedDocuments(c: AppContainer): void {
     "app-asil-cem-polat",
   ];
   for (const appId of intibakApps) {
-    c.documents.put(makeDoc(appId, DocumentType.Transcript, true));
+    docs.push(makeDoc(appId, DocumentType.Transcript, true));
   }
 
   const ydyoApps = ["app-ydyo-1", "app-ydyo-2", "app-ydyo-3", "app-ydyo-4"];
   for (const appId of ydyoApps) {
-    c.documents.put(makeDoc(appId, DocumentType.LanguageProof, true));
+    docs.push(makeDoc(appId, DocumentType.LanguageProof, true));
   }
+
+  return docs;
+}
+
+function seedDocuments(c: AppContainer): void {
+  for (const doc of buildSeedDocuments()) c.documents.put(doc);
 }
 
 function seedCurriculum(c: AppContainer): void {

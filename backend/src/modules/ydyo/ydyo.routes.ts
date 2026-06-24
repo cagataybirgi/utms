@@ -6,8 +6,11 @@ import { UserRole } from "../../shared/types";
 import { asyncHandler } from "../../shared/middleware/async-handler";
 import {
   IAsyncApplicationRepository,
+  IAsyncDocumentRepository,
   InMemoryAsyncApplicationRepository,
+  InMemoryAsyncDocumentRepository,
   PrismaApplicationRepository,
+  PrismaDocumentRepository,
 } from "../../shared/repositories";
 import { YdyoService } from "./ydyo.service";
 import { YdyoController } from "./ydyo.controller";
@@ -16,18 +19,22 @@ export function buildYdyoRouter(container: AppContainer): Router {
   const audit = new AuditLogger(container.audit);
   const notifications = new NotificationService(container.notifications);
 
-  // Runtime reads/writes applications from Neon (Prisma) so the YDYO queue sees
-  // the apps ÖİDB forwards (IN_REVIEW_YDYO) and its decisions persist to the
-  // same store the Dean/YGK steps read from. Tests use the in-memory container
-  // (NODE_ENV=test).
+  // Runtime reads/writes applications AND documents from Neon (Prisma) so the
+  // YDYO queue sees the apps ÖİDB forwards (IN_REVIEW_YDYO), its decisions
+  // persist to the same store the Dean/YGK steps read from, and the language
+  // proof document a live student uploaded is visible. Tests use the in-memory
+  // container (NODE_ENV=test).
   const useDatabase = process.env.NODE_ENV !== "test";
   const applications: IAsyncApplicationRepository = useDatabase
     ? new PrismaApplicationRepository()
     : new InMemoryAsyncApplicationRepository(container.applications);
+  const documents: IAsyncDocumentRepository = useDatabase
+    ? new PrismaDocumentRepository()
+    : new InMemoryAsyncDocumentRepository(container.documents);
 
   const service = new YdyoService({
     applications,
-    documents: container.documents,
+    documents,
     audit,
     notifications,
   });

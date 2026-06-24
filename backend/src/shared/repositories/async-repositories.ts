@@ -1,11 +1,12 @@
 import { prisma } from "../prisma-client";
-import { Application, DepartmentQuota, EvaluationPackage } from "../types";
+import { Application, DepartmentQuota, Document, EvaluationPackage } from "../types";
 import { BoardReviewState } from "../../modules/board/board.types";
 import {
   toDomain,
   toPrismaCreate,
   toPrismaUpdate,
 } from "../mappers/application-mapper";
+import { documentToDomain } from "../mappers/document-mapper";
 import {
   packageToDomain,
   packageToPrismaUpsert,
@@ -17,11 +18,13 @@ import {
 import {
   IAsyncApplicationRepository,
   IAsyncBoardReviewStateRepository,
+  IAsyncDocumentRepository,
   IAsyncPackageRepository,
   IAsyncQuotaRepository,
 } from "./async-interfaces";
 import {
   InMemoryApplicationRepository,
+  InMemoryDocumentRepository,
   InMemoryPackageRepository,
   InMemoryQuotaRepository,
 } from "./in-memory";
@@ -57,6 +60,23 @@ export class PrismaApplicationRepository implements IAsyncApplicationRepository 
       update: toPrismaUpdate(application),
     });
     return toDomain(row);
+  }
+}
+
+export class PrismaDocumentRepository implements IAsyncDocumentRepository {
+  async findByApplicationId(applicationId: string): Promise<Document[]> {
+    const rows = await prisma.document.findMany({
+      where: { applicationId },
+      include: { versions: true },
+    });
+    return rows.map(documentToDomain);
+  }
+
+  // Neon is the document store; on a live deployment it is always reachable
+  // here (the DocumentStore-unreachable failure path is exercised in tests via
+  // the in-memory adapter below).
+  isStoreReachable(): boolean {
+    return true;
   }
 }
 
@@ -102,6 +122,18 @@ export class InMemoryAsyncApplicationRepository
 
   async save(application: Application): Promise<Application> {
     return this.inner.save(application);
+  }
+}
+
+export class InMemoryAsyncDocumentRepository implements IAsyncDocumentRepository {
+  constructor(private readonly inner: InMemoryDocumentRepository) {}
+
+  async findByApplicationId(applicationId: string): Promise<Document[]> {
+    return this.inner.findByApplicationId(applicationId);
+  }
+
+  isStoreReachable(): boolean {
+    return this.inner.isStoreReachable();
   }
 }
 

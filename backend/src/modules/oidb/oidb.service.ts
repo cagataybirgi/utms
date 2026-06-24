@@ -16,7 +16,7 @@ import {
 } from "../../shared/errors";
 import {
   IAsyncApplicationRepository,
-  IDocumentRepository,
+  IAsyncDocumentRepository,
   IUserRepository,
 } from "../../shared/repositories";
 import { EDevletMockClient } from "../../shared/external/edevlet-client";
@@ -24,7 +24,7 @@ import { AuditLogger, NotificationService } from "../../shared/audit";
 
 export interface OidbServiceDeps {
   applications: IAsyncApplicationRepository;
-  documents: IDocumentRepository;
+  documents: IAsyncDocumentRepository;
   users: IUserRepository;
   edevlet: EDevletMockClient;
   audit: AuditLogger;
@@ -72,7 +72,7 @@ export class OidbService {
         "Document can not find. Action blocked, review halted.",
       );
     }
-    const documents = this.deps.documents.findByApplicationId(applicationId);
+    const documents = await this.deps.documents.findByApplicationId(applicationId);
     const verifications = documents.map<DocumentVerificationOutcome>((d) => {
       const v = d.versions[d.versions.length - 1];
       try {
