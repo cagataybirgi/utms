@@ -69,7 +69,7 @@ export class OidbService {
     if (!this.deps.documents.isStoreReachable()) {
       throw new ServiceUnavailableError(
         "DOCUMENT_STORE_UNREACHABLE",
-        "Document can not find. Action blocked, review halted.",
+        "Belge bulunamadı. İşlem engellendi, inceleme durduruldu.",
       );
     }
     const documents = await this.deps.documents.findByApplicationId(applicationId);
@@ -100,7 +100,7 @@ export class OidbService {
     if (!this.deps.documents.isStoreReachable()) {
       throw new ServiceUnavailableError(
         "DOCUMENT_STORE_UNREACHABLE",
-        "Action blocked, review halted.",
+        "İşlem engellendi, inceleme durduruldu.",
       );
     }
     if (

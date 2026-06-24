@@ -36,7 +36,7 @@ export class OidbController {
   };
 
   getDetail = async (req: Request, res: Response): Promise<void> => {
-    this.assertDocumentStoreUp(req, "Document can not find. Action blocked, review halted.");
+    this.assertDocumentStoreUp(req, "Belge bulunamadı. İşlem engellendi, inceleme durduruldu.");
     const { applicationId } = req.params;
     const detail = await this.service.loadDetail(applicationId);
     res.json(detail);
@@ -51,7 +51,7 @@ export class OidbController {
   };
 
   verify = async (req: Request, res: Response): Promise<void> => {
-    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
+    this.assertDocumentStoreUp(req, "İşlem engellendi, inceleme durduruldu.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const updated = await this.service.verify(applicationId, userId);
@@ -59,7 +59,7 @@ export class OidbController {
   };
 
   returnForCorrection = async (req: Request, res: Response): Promise<void> => {
-    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
+    this.assertDocumentStoreUp(req, "İşlem engellendi, inceleme durduruldu.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = ReturnSchema.parse(req.body);
@@ -71,7 +71,7 @@ export class OidbController {
   };
 
   reject = async (req: Request, res: Response): Promise<void> => {
-    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
+    this.assertDocumentStoreUp(req, "İşlem engellendi, inceleme durduruldu.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = RejectSchema.parse(req.body);
@@ -80,7 +80,7 @@ export class OidbController {
   };
 
   forward = async (req: Request, res: Response): Promise<void> => {
-    this.assertDocumentStoreUp(req, "Action blocked, review halted.");
+    this.assertDocumentStoreUp(req, "İşlem engellendi, inceleme durduruldu.");
     const userId = this.requireUser(req);
     const { applicationId } = req.params;
     const body = ForwardSchema.parse(req.body ?? {});

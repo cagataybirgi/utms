@@ -16,14 +16,14 @@ describe("Test Case 4-DocumentStoreUnreachable (simulation header)", () => {
       .set("x-simulate-docstore-down", "1");
     expect(detailRes.status).toBe(503);
     expect(detailRes.body.error).toBe("DOCUMENT_STORE_UNREACHABLE");
-    expect(detailRes.body.message).toBe("Document can not find. Action blocked, review halted.");
+    expect(detailRes.body.message).toBe("Belge bulunamadı. İşlem engellendi, inceleme durduruldu.");
 
     const verifyRes = await officer
       .post(`/api/oidb/applications/${targetId}/verify`)
       .set("x-simulate-docstore-down", "1")
       .send({});
     expect(verifyRes.status).toBe(503);
-    expect(verifyRes.body.message).toBe("Action blocked, review halted.");
+    expect(verifyRes.body.message).toBe("İşlem engellendi, inceleme durduruldu.");
 
     // Status is unchanged — the review was halted before any mutation.
     const stored = kit.container.applications.findById(targetId);
