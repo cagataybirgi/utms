@@ -277,6 +277,10 @@ model DocumentVersion {
   // overrides the (computed, non-persisted) e-Devlet mock badge.
   verifiedByName       String?   @map("verified_by_name")
   verifiedAt           DateTime? @map("verified_at")
+  // Set manually in the DB to mark a document as rejected by e-Devlet. Takes
+  // precedence over every other state (mock + hand verification) and blocks
+  // ÖİDB approval until the application is returned/rejected.
+  edevletRejected      Boolean   @default(false) @map("edevlet_rejected")
 
   // uploadedBy stores the userId string — no FK so InMemory user IDs work without a Neon users row.
   document Document @relation(fields: [documentId], references: [documentId])

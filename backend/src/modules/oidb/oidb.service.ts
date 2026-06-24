@@ -112,6 +112,19 @@ export class OidbService {
         `Cannot verify application in status ${application.currentStatus}`,
       );
     }
+    // A document e-Devlet has rejected can't be approved over — the application
+    // must be returned or rejected instead.
+    const documents = await this.deps.documents.findByApplicationId(applicationId);
+    const hasRejected = documents.some((d) => {
+      const v = d.versions[d.versions.length - 1];
+      return v?.edevletRejected === true;
+    });
+    if (hasRejected) {
+      throw new ConflictError(
+        "DOCUMENT_EDEVLET_REJECTED",
+        "e-Devlet tarafından reddedilen belge var; başvuru onaylanamaz. Başvuruyu iade edin veya reddedin.",
+      );
+    }
     const previous = application.currentStatus;
     application.currentStatus = ApplicationStatus.IntakeVerified;
     application.intakeVerifiedBy = actorUserId;

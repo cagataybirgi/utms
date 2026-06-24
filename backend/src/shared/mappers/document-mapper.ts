@@ -21,6 +21,7 @@ export function documentToDomain(row: PrismaDocumentRow): Document {
       isCorrupt: v.isCorrupt,
       verifiedByName: v.verifiedByName ?? undefined,
       verifiedAt: v.verifiedAt ? v.verifiedAt.toISOString() : undefined,
+      edevletRejected: v.edevletRejected,
     }));
 
   return {

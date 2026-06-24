@@ -140,6 +140,7 @@ export interface OidbDocumentVersion {
   isCorrupt?: boolean;
   verifiedByName?: string;
   verifiedAt?: string;
+  edevletRejected?: boolean;
 }
 
 export interface DocumentVerificationResult {

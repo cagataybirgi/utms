@@ -51,6 +51,7 @@ export interface DocumentVersion {
   isCorrupt?: boolean;
   verifiedByName?: string;
   verifiedAt?: string;
+  edevletRejected?: boolean;
 }
 
 export interface DeptConditionCheck {

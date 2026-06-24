@@ -1,6 +1,6 @@
 import { get } from "@vercel/blob";
 import { prisma } from "../../shared/prisma-client";
-import { NotFoundError, ServiceUnavailableError } from "../../shared/errors";
+import { ConflictError, NotFoundError, ServiceUnavailableError } from "../../shared/errors";
 import { IUserRepository } from "../../shared/repositories";
 
 // Streams the actual uploaded document file to the ÖİDB officer. Metadata (the
@@ -51,6 +51,12 @@ export class OidbDocumentsService {
     if (!doc || !version) {
       throw new NotFoundError(
         `No uploaded document for slot ${documentType} on application ${applicationId}.`,
+      );
+    }
+    if (version.edevletRejected) {
+      throw new ConflictError(
+        "DOCUMENT_EDEVLET_REJECTED",
+        "e-Devlet tarafından reddedilen belge elle doğrulanamaz.",
       );
     }
 

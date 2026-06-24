@@ -509,6 +509,14 @@ function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: Detail
   const checklist = buildChecklist(app, documents);
   const selectedEntry = checklist.find((c) => c.slot === selectedSlot) ?? null;
 
+  // Documents e-Devlet has rejected (set manually in the DB). This overrides
+  // every other status — mock verification and hand verification alike.
+  const rejectedSlots = new Set(
+    documents
+      .filter((d) => d.versions[d.versions.length - 1]?.edevletRejected === true)
+      .map((d) => d.documentType),
+  );
+
   const inPool =
     app.currentStatus === 'PENDING_OIDB_VERIFICATION' ||
     app.currentStatus === 'RETURNED_FOR_CORRECTION';
@@ -622,12 +630,13 @@ function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: Detail
     }
   };
 
-  // When e-Devlet is down, completing the ÖİDB verification is blocked until every
-  // uploaded document has been verified by hand.
+  // Approval is blocked when a document is e-Devlet rejected, or (when e-Devlet
+  // is down) until every uploaded document has been verified by hand.
   const pendingManual = edevletDown
-    ? checklist.filter((c) => c.uploaded && !manualVerified[c.slot])
+    ? checklist.filter((c) => c.uploaded && !manualVerified[c.slot] && !rejectedSlots.has(c.slot))
     : [];
-  const verifyBlocked = edevletDown && pendingManual.length > 0;
+  const hasRejected = checklist.some((c) => c.uploaded && rejectedSlots.has(c.slot));
+  const verifyBlocked = hasRejected || (edevletDown && pendingManual.length > 0);
 
   // Download every uploaded document for this student as a single zip. Each file
   // is fetched through the private-blob proxy, bundled client-side with JSZip,
@@ -732,12 +741,17 @@ function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: Detail
                 Reddet
               </Button>
             </div>
-            {verifyBlocked && (
+            {hasRejected ? (
+              <div className="text-xs text-red-700 flex items-center gap-1">
+                <XCircle className="w-3.5 h-3.5" />
+                e-Devlet tarafından reddedilen belge var. Başvuru onaylanamaz; iade edin veya reddedin.
+              </div>
+            ) : verifyBlocked ? (
               <div className="text-xs text-amber-700 flex items-center gap-1">
                 <ShieldAlert className="w-3.5 h-3.5" />
                 e-Devlet arızalı: {pendingManual.length} belge elle doğrulanmayı bekliyor. Tümü doğrulanmadan başvuru onaylanamaz.
               </div>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -904,6 +918,7 @@ function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: Detail
                 {checklist.map((doc) => {
                   const active = selectedSlot === doc.slot;
                   const verifiedBy = manualVerified[doc.slot];
+                  const rejected = rejectedSlots.has(doc.slot);
                   return (
                     <div
                       key={doc.slot}
@@ -917,6 +932,10 @@ function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: Detail
                         </div>
                         {!doc.uploaded ? (
                           <Badge className="bg-gray-200 text-gray-600 border-none text-[10px]">Yüklenmedi</Badge>
+                        ) : rejected ? (
+                          <Badge className="bg-red-600 hover:bg-red-700 text-white border-none text-[10px]">
+                            e-Devlet: Reddedildi
+                          </Badge>
                         ) : verifiedBy ? (
                           <Badge className="bg-green-600 hover:bg-green-700 text-white border-none text-[10px]">
                             Doğrulandı (elle)
@@ -937,6 +956,11 @@ function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: Detail
                           <span className="flex items-center italic text-gray-400">
                             <AlertTriangle className="w-3 h-3 mr-1 text-gray-400" />
                             Eksik
+                          </span>
+                        ) : rejected ? (
+                          <span className="flex items-center italic text-red-700 truncate">
+                            <XCircle className="w-3 h-3 mr-1 shrink-0 text-red-600" />
+                            e-Devlet tarafından reddedildi
                           </span>
                         ) : verifiedBy ? (
                           <span className="flex items-center italic text-green-700 truncate">
@@ -980,7 +1004,11 @@ function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: Detail
             <span className="truncate flex items-center gap-2">
               Görüntülenen: {selectedSlot ? DOCUMENT_SLOT_LABELS[selectedSlot] : 'Belge seçilmedi'}
               {selectedSlot && selectedEntry?.uploaded && (
-                manualVerified[selectedSlot] ? (
+                rejectedSlots.has(selectedSlot) ? (
+                  <span className="inline-flex items-center gap-1 text-red-300">
+                    <XCircle className="w-3 h-3" /> e-Devlet Reddedildi
+                  </span>
+                ) : manualVerified[selectedSlot] ? (
                   <span className="inline-flex items-center gap-1 text-green-300">
                     <BadgeCheck className="w-3 h-3" /> Doğrulayan: {manualVerified[selectedSlot]}
                   </span>
