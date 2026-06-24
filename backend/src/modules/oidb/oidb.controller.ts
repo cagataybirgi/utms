@@ -50,6 +50,14 @@ export class OidbController {
     res.send(file.buffer);
   };
 
+  verifyDocument = async (req: Request, res: Response): Promise<void> => {
+    this.assertDocumentStoreUp(req, "İşlem engellendi, inceleme durduruldu.");
+    const userId = this.requireUser(req);
+    const { applicationId, documentType } = req.params;
+    const result = await this.documents.verifyDocument(applicationId, documentType, userId);
+    res.json(result);
+  };
+
   verify = async (req: Request, res: Response): Promise<void> => {
     this.assertDocumentStoreUp(req, "İşlem engellendi, inceleme durduruldu.");
     const userId = this.requireUser(req);

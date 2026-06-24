@@ -49,6 +49,8 @@ export interface DocumentVersion {
   uploadedBy: string;
   hasBarcode: boolean;
   isCorrupt?: boolean;
+  verifiedByName?: string;
+  verifiedAt?: string;
 }
 
 export interface DeptConditionCheck {

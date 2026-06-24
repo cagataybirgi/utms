@@ -273,6 +273,10 @@ model DocumentVersion {
   uploadedBy           String   @map("uploaded_by")
   hasBarcode           Boolean  @default(false) @map("has_barcode")
   isCorrupt            Boolean  @default(false) @map("is_corrupt")
+  // ÖİDB officer manual verification. Persisted so it survives reloads and
+  // overrides the (computed, non-persisted) e-Devlet mock badge.
+  verifiedByName       String?   @map("verified_by_name")
+  verifiedAt           DateTime? @map("verified_at")
 
   // uploadedBy stores the userId string — no FK so InMemory user IDs work without a Neon users row.
   document Document @relation(fields: [documentId], references: [documentId])

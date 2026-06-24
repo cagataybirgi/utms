@@ -19,6 +19,8 @@ export function documentToDomain(row: PrismaDocumentRow): Document {
       uploadedBy: v.uploadedBy,
       hasBarcode: v.hasBarcode,
       isCorrupt: v.isCorrupt,
+      verifiedByName: v.verifiedByName ?? undefined,
+      verifiedAt: v.verifiedAt ? v.verifiedAt.toISOString() : undefined,
     }));
 
   return {

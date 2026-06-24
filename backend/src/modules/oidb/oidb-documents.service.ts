@@ -1,6 +1,7 @@
 import { get } from "@vercel/blob";
 import { prisma } from "../../shared/prisma-client";
 import { NotFoundError, ServiceUnavailableError } from "../../shared/errors";
+import { IUserRepository } from "../../shared/repositories";
 
 // Streams the actual uploaded document file to the ÖİDB officer. Metadata (the
 // document list) comes from OidbService.loadDetail; this exists only because the
@@ -11,6 +12,12 @@ export interface OidbDocumentFile {
   buffer: Buffer;
   contentType: string;
   fileName: string;
+}
+
+export interface DocumentVerificationResult {
+  documentType: string;
+  verifiedByName: string;
+  verifiedAt: string;
 }
 
 const CONTENT_TYPE_BY_EXT: Record<string, string> = {
@@ -26,6 +33,37 @@ function contentTypeFor(fileName: string): string {
 }
 
 export class OidbDocumentsService {
+  constructor(private readonly users: IUserRepository) {}
+
+  // Persists an ÖİDB officer's manual verification on the active version of a
+  // document slot. Stored in Neon so it survives reloads and overrides the
+  // computed e-Devlet mock badge on every later read.
+  async verifyDocument(
+    applicationId: string,
+    documentType: string,
+    actorUserId: string,
+  ): Promise<DocumentVerificationResult> {
+    const doc = await prisma.document.findFirst({
+      where: { applicationId, documentType },
+      include: { versions: { orderBy: { versionNumber: "desc" } } },
+    });
+    const version = doc?.versions.find((v) => v.isActive) ?? doc?.versions[0];
+    if (!doc || !version) {
+      throw new NotFoundError(
+        `No uploaded document for slot ${documentType} on application ${applicationId}.`,
+      );
+    }
+
+    const verifiedByName = this.users.findById(actorUserId)?.fullName ?? actorUserId;
+    const verifiedAt = new Date();
+    await prisma.documentVersion.update({
+      where: { versionId: version.versionId },
+      data: { verifiedByName, verifiedAt },
+    });
+
+    return { documentType, verifiedByName, verifiedAt: verifiedAt.toISOString() };
+  }
+
   async fetchFile(applicationId: string, documentType: string): Promise<OidbDocumentFile> {
     const doc = await prisma.document.findFirst({
       where: { applicationId, documentType },

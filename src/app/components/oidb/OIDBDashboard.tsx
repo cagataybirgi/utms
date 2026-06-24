@@ -115,7 +115,6 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
         <OidbDetailPanel
           app={selected}
           userId={user.id}
-          userName={`${user.name} ${user.surname}`.trim()}
           edevletDown={edevletDown}
           onUpdated={(updated) => setSelected(updated)}
           onBack={backToDashboard}
@@ -416,7 +415,6 @@ export function OIDBDashboard({ user, onLogout, onSwitchRole }: OIDBDashboardPro
 interface DetailPanelProps {
   app: OidbApplication;
   userId: string;
-  userName: string;
   edevletDown: boolean;
   onUpdated: (app: OidbApplication) => void;
   onBack: () => void;
@@ -475,15 +473,17 @@ function previewKind(mime: string): PreviewKind {
   return 'other';
 }
 
-function OidbDetailPanel({ app, userId, userName, edevletDown, onUpdated, onBack }: DetailPanelProps) {
+function OidbDetailPanel({ app, userId, edevletDown, onUpdated, onBack }: DetailPanelProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Per-document manual verification by the ÖİDB officer (this session). When
-  // e-Devlet is down nothing is auto-verified, so the officer must verify each
-  // document by hand before the application can be approved.
+  // Per-document manual verification by the ÖİDB officer. Seeded from the
+  // persisted value the backend returns (survives reloads) and updated when the
+  // officer verifies a document by hand. When e-Devlet is down nothing is
+  // auto-verified, so every document must be hand-verified before approval.
   const [manualVerified, setManualVerified] = useState<Record<string, string>>({});
+  const [verifyingSlot, setVerifyingSlot] = useState<string | null>(null);
 
   const [showReturn, setShowReturn] = useState(false);
   const [returnSlot, setReturnSlot] = useState<DocumentSlot>('TRANSCRIPT');
@@ -524,6 +524,13 @@ function OidbDetailPanel({ app, userId, userName, edevletDown, onUpdated, onBack
       .then((d) => {
         if (cancelled) return;
         setDocuments(d.documents);
+        // Seed manual verifications from the persisted server state.
+        const seeded: Record<string, string> = {};
+        for (const doc of d.documents) {
+          const v = doc.versions[doc.versions.length - 1];
+          if (v?.verifiedByName) seeded[doc.documentType] = v.verifiedByName;
+        }
+        setManualVerified(seeded);
         const entries = buildChecklist(d.application, d.documents);
         const firstUploaded = entries.find((e) => e.uploaded) ?? entries[0] ?? null;
         setSelectedSlot(firstUploaded ? firstUploaded.slot : null);
@@ -601,8 +608,18 @@ function OidbDetailPanel({ app, userId, userName, edevletDown, onUpdated, onBack
   const [downloadingAll, setDownloadingAll] = useState(false);
   const uploadedCount = checklist.filter((c) => c.uploaded).length;
 
-  const markDocumentVerified = (slot: DocumentSlot) => {
-    setManualVerified((prev) => ({ ...prev, [slot]: userName }));
+  const markDocumentVerified = async (slot: DocumentSlot) => {
+    if (manualVerified[slot] || verifyingSlot) return;
+    setVerifyingSlot(slot);
+    setError(null);
+    try {
+      const res = await oidbApi.verifyDocument(app.applicationId, slot, userId);
+      setManualVerified((prev) => ({ ...prev, [slot]: res.verifiedByName }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Belge doğrulanamadı');
+    } finally {
+      setVerifyingSlot(null);
+    }
   };
 
   // When e-Devlet is down, completing the ÖİDB verification is blocked until every
@@ -915,7 +932,7 @@ function OidbDetailPanel({ app, userId, userName, edevletDown, onUpdated, onBack
                         )}
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-gray-500 gap-2">
-                        <span className="truncate max-w-[50%]">{doc.fileName ?? 'Belge yüklenmedi'}</span>
+                        <span className="truncate max-w-[45%]">{doc.fileName ?? 'Belge yüklenmedi'}</span>
                         {!doc.uploaded ? (
                           <span className="flex items-center italic text-gray-400">
                             <AlertTriangle className="w-3 h-3 mr-1 text-gray-400" />
@@ -926,22 +943,27 @@ function OidbDetailPanel({ app, userId, userName, edevletDown, onUpdated, onBack
                             <BadgeCheck className="w-3 h-3 mr-1 shrink-0 text-green-600" />
                             Doğrulayan: {verifiedBy}
                           </span>
-                        ) : edevletDown ? (
+                        ) : (
                           <button
                             type="button"
+                            disabled={verifyingSlot === doc.slot}
                             onClick={(e) => {
                               e.stopPropagation();
                               markDocumentVerified(doc.slot);
                             }}
-                            className="flex items-center gap-1 text-amber-700 border border-amber-300 rounded px-1.5 py-0.5 hover:bg-amber-50 shrink-0"
+                            className={`flex items-center gap-1 border rounded px-1.5 py-0.5 shrink-0 ${
+                              edevletDown
+                                ? 'text-amber-700 border-amber-300 hover:bg-amber-50'
+                                : 'text-gray-600 border-gray-300 hover:bg-gray-50'
+                            }`}
                           >
-                            <ShieldCheck className="w-3 h-3" /> Elle Doğrula
+                            {verifyingSlot === doc.slot ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <ShieldCheck className="w-3 h-3" />
+                            )}
+                            Elle Doğrula
                           </button>
-                        ) : (
-                          <span className="flex items-center italic text-blue-700">
-                            <CheckCircle2 className="w-3 h-3 mr-1 text-blue-600" />
-                            Otomatik doğrulandı (mock)
-                          </span>
                         )}
                       </div>
                     </div>

@@ -138,6 +138,14 @@ export interface OidbDocumentVersion {
   uploadedBy: string;
   hasBarcode: boolean;
   isCorrupt?: boolean;
+  verifiedByName?: string;
+  verifiedAt?: string;
+}
+
+export interface DocumentVerificationResult {
+  documentType: DocumentSlot;
+  verifiedByName: string;
+  verifiedAt: string;
 }
 
 export interface OidbDocument {
@@ -195,6 +203,22 @@ export async function fetchOidbDocumentFile(
   return res.blob();
 }
 
+export async function verifyDocument(
+  applicationId: string,
+  documentType: DocumentSlot,
+  userId: string,
+): Promise<DocumentVerificationResult> {
+  const res = await fetch(
+    `${BASE}/applications/${applicationId}/documents/${documentType}/verify`,
+    {
+      method: 'POST',
+      headers: { ...authHeaders(userId), 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+  );
+  return handle(res);
+}
+
 export async function verifyApplication(
   applicationId: string,
   userId: string,
@@ -250,6 +274,7 @@ export const oidbApi = {
   queue: fetchOidbQueue,
   detail: fetchOidbDetail,
   documentFile: fetchOidbDocumentFile,
+  verifyDocument,
   verify: verifyApplication,
   returnForCorrection,
   reject: rejectApplication,

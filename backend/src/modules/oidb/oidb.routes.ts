@@ -40,7 +40,7 @@ export function buildOidbRouter(container: AppContainer): Router {
     audit,
     notifications,
   });
-  const controller = new OidbController(service, new OidbDocumentsService());
+  const controller = new OidbController(service, new OidbDocumentsService(container.users));
 
   const r = Router();
   r.use(requireRoles(UserRole.OidbOfficer, UserRole.SystemAdmin));
@@ -50,6 +50,10 @@ export function buildOidbRouter(container: AppContainer): Router {
   r.get(
     "/applications/:applicationId/documents/:documentType/file",
     asyncHandler(controller.getDocumentFile),
+  );
+  r.post(
+    "/applications/:applicationId/documents/:documentType/verify",
+    asyncHandler(controller.verifyDocument),
   );
   r.post("/applications/:applicationId/verify", asyncHandler(controller.verify));
   r.post("/applications/:applicationId/return", asyncHandler(controller.returnForCorrection));
