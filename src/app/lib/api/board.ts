@@ -251,6 +251,52 @@ export function returnToYgk(
   });
 }
 
+// ── TC-7C — Dean digital signature ───────────────────────────────────────────
+
+export interface SignatureIssueResult {
+  token: string;
+  validForHours: number;
+  signatoryId: string;
+  issuedAt: string;
+}
+
+export interface SignatureVerifyResult {
+  packageId: string;
+  token: string;
+  state: 'valid' | 'expired' | 'invalid' | 'not_issued';
+  errorCode: '7C-EXPIRED' | '7C-INVALID' | null;
+  message: string;
+  clearedAt: string | null;
+}
+
+export function issueSignature(signatoryId: string): Promise<SignatureIssueResult> {
+  return call<SignatureIssueResult>('POST', '/signatures/issue', { signatoryId });
+}
+
+export function verifySignature(
+  packageId: string,
+  token: string,
+  signatoryId: string,
+): Promise<SignatureVerifyResult> {
+  return call<SignatureVerifyResult>('POST', `/packages/${packageId}/verify-signature`, {
+    token,
+    signatoryId,
+  });
+}
+
+/**
+ * One-shot dean signature: issues a single-use token then verifies it against
+ * the package. Mirrors the backend two-step flow but hides the token from the
+ * UI. Throws BoardApiError on 7B (intibak gate) / 7C (token) / 702-HASH.
+ */
+export async function signPackage(
+  packageId: string,
+  signatoryId: string,
+): Promise<SignatureVerifyResult> {
+  const issued = await issueSignature(signatoryId);
+  return verifySignature(packageId, issued.token, signatoryId);
+}
+
 // ── UI helpers ───────────────────────────────────────────────────────────────
 
 /** Display-only labels mirroring the seed data used by intibak.ts. */
