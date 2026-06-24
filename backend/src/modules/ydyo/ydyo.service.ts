@@ -9,12 +9,15 @@ import {
   UserRole,
 } from "../../shared/types";
 import { ConflictError, NotFoundError, ValidationError } from "../../shared/errors";
-import { IAsyncApplicationRepository, IDocumentRepository } from "../../shared/repositories";
+import {
+  IAsyncApplicationRepository,
+  IAsyncDocumentRepository,
+} from "../../shared/repositories";
 import { AuditLogger, NotificationService } from "../../shared/audit";
 
 export interface YdyoServiceDeps {
   applications: IAsyncApplicationRepository;
-  documents: IDocumentRepository;
+  documents: IAsyncDocumentRepository;
   audit: AuditLogger;
   notifications: NotificationService;
 }
@@ -96,9 +99,8 @@ export class YdyoService {
       application.languageProof = languageProof;
       await this.deps.applications.save(application);
     }
-    const document = this.deps.documents
-      .findByApplicationId(applicationId)
-      .find((d) => d.documentType === DocumentType.LanguageProof);
+    const documents = await this.deps.documents.findByApplicationId(applicationId);
+    const document = documents.find((d) => d.documentType === DocumentType.LanguageProof);
     const rule = LANGUAGE_RULES[languageProof.examType];
     return {
       application,

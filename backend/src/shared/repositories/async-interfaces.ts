@@ -1,4 +1,4 @@
-import { Application, DepartmentQuota, EvaluationPackage } from "../types";
+import { Application, DepartmentQuota, Document, EvaluationPackage } from "../types";
 import { BoardReviewState } from "../../modules/board/board.types";
 
 // Async repository contracts used by the ranking module so its data source can
@@ -20,6 +20,15 @@ export interface IAsyncQuotaRepository {
     departmentId: string,
     periodId: string
   ): Promise<DepartmentQuota | undefined>;
+}
+
+// Documents read by the OIDB review (Scenario 4) and YDYO language review
+// (Scenario 3.1). Backed by Neon at runtime so a live student's uploaded
+// documents appear in the officer's detail view. isStoreReachable is kept
+// synchronous to preserve the DocumentStore-unreachable test path.
+export interface IAsyncDocumentRepository {
+  findByApplicationId(applicationId: string): Promise<Document[]>;
+  isStoreReachable(): boolean;
 }
 
 // Scenarios 6/7 — EvaluationPackage + BoardReviewState persisted to Neon so

@@ -9,6 +9,7 @@
 import { PrismaClient } from "@prisma/client";
 import {
   buildSeedApplications,
+  buildSeedDocuments,
   buildSeedQuotas,
   buildSeedUsers,
 } from "../src/mocks/seed-data";
@@ -119,9 +120,56 @@ async function seedApplicationsAndQuotas(): Promise<void> {
   );
 }
 
+async function seedDocuments(): Promise<void> {
+  // Upsert the document slot + its first version so a live OIDB/YDYO officer sees
+  // the same documents in Neon that the in-memory fixtures expose. Idempotent by
+  // documentId / versionId.
+  const docs = buildSeedDocuments();
+  for (const doc of docs) {
+    await prisma.document.upsert({
+      where: {
+        applicationId_documentType: {
+          applicationId: doc.applicationId,
+          documentType: doc.documentType,
+        },
+      },
+      create: {
+        documentId: doc.documentId,
+        applicationId: doc.applicationId,
+        documentType: doc.documentType,
+        fileType: doc.documentType,
+        status: "UPLOADED",
+      },
+      update: { status: "UPLOADED" },
+    });
+    for (const v of doc.versions) {
+      await prisma.documentVersion.upsert({
+        where: { versionId: v.versionId },
+        create: {
+          versionId: v.versionId,
+          documentId: doc.documentId,
+          standardizedFileName: v.standardizedFileName,
+          storageKey: v.storageKey,
+          versionNumber: v.versionNumber,
+          isActive: true,
+          uploadedBy: v.uploadedBy,
+          hasBarcode: v.hasBarcode,
+          isCorrupt: v.isCorrupt ?? false,
+        },
+        update: {
+          hasBarcode: v.hasBarcode,
+          isCorrupt: v.isCorrupt ?? false,
+        },
+      });
+    }
+  }
+  console.log(`Seeded ${docs.length} documents (+versions) into Neon.`);
+}
+
 async function main(): Promise<void> {
   await seedUsers();
   await seedApplicationsAndQuotas();
+  await seedDocuments();
 }
 
 main()
