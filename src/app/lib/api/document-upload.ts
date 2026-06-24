@@ -142,6 +142,18 @@ export interface StageLogDto {
   notes: string | null;
 }
 
+export interface IntibakCourseRowDto {
+  sourceCourses: { code: string; name: string; ects: number }[];
+  targetCourse: { code: string; name: string; ects: number } | null;
+  status: string;
+}
+
+export interface IntibakDetailDto {
+  isLocked: boolean;
+  rows: IntibakCourseRowDto[];
+  totalExemptedEcts: number;
+}
+
 export interface ApplicationDetailDto {
   applicationId: string;
   studentFullName: string;
@@ -156,8 +168,10 @@ export interface ApplicationDetailDto {
   correctionReasons: unknown[];
   rejectionReason: string | null;
   rankingCategory: string | null;
+  transferScore: number | null;
   hasIntibak: boolean;
   hasLockedIntibak: boolean;
+  intibak: IntibakDetailDto | null;
   stageLogs: StageLogDto[];
   targetDepartmentId: string;
   targetFacultyId: string;

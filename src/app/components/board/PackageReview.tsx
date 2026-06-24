@@ -363,7 +363,7 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
               <div className="text-center">
                 <div className="text-sm font-bold">Yayına Onayla (ÖİDB'ye Gönder)</div>
                 <div className="text-xs opacity-80">
-                  Lifecycle → READY_FOR_PUBLICATION
+                  Durum → Yayına Hazır
                 </div>
               </div>
             </Button>
@@ -402,9 +402,9 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
           <DialogHeader>
             <DialogTitle>Değerlendirme Paketini Onayla</DialogTitle>
             <DialogDescription>
-              Fakülte Yönetim Kurulu onayı ile paket APPROVED_BY_BOARD durumuna geçer.
-              Yayın için ÖİDB'ye iletmek üzere bir sonraki adımda "Yayına Onayla"
-              butonu görünür.
+              Fakülte Yönetim Kurulu onayı ile paket "Kurul Tarafından Onaylandı"
+              durumuna geçer. Yayın için ÖİDB'ye iletmek üzere bir sonraki adımda
+              "Yayına Onayla" butonu görünür.
             </DialogDescription>
           </DialogHeader>
 
@@ -416,7 +416,7 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
                 <ul className="list-disc list-inside mt-2 space-y-1">
                   <li>{pkg.asilApplicationIds.length} Asil öğrenci kabul edilecek</li>
                   <li>{pkg.yedekApplicationIds.length} Yedek öğrenci listelenecek</li>
-                  <li>Lifecycle → APPROVED_BY_BOARD</li>
+                  <li>Durum → Kurul Tarafından Onaylandı</li>
                 </ul>
               </AlertDescription>
             </Alert>
@@ -487,8 +487,9 @@ export function PackageReview({ packageId, onBack }: PackageReviewProps) {
             <Alert variant="destructive">
               <XCircle className="h-4 w-4" />
               <AlertDescription className="text-sm font-medium">
-                Paket REJECTED_BY_BOARD durumuna geçer, başvuru durumları
-                IN_REVIEW_YGK'ya döner ve Dekanlığa otomatik bir bildirim gönderilir.
+                Paket "Kurul Tarafından Reddedildi" durumuna geçer, başvurular
+                "YGK İncelemesi" aşamasına döner ve Dekanlığa otomatik bir bildirim
+                gönderilir.
               </AlertDescription>
             </Alert>
 

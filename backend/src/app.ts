@@ -13,6 +13,10 @@ import { buildPeriodRouter } from "./modules/period/period.routes";
 import { buildBoardRouter } from "./modules/board/board.routes";
 import { buildProfileRouter } from "./modules/profile/profile.routes";
 import { buildYdyoRouter } from "./modules/ydyo/ydyo.routes";
+import {
+  buildNotificationRouter,
+  createNotificationStore,
+} from "./modules/notification/notification.routes";
 
 export interface CreateAppOptions {
   container?: AppContainer;
@@ -73,7 +77,12 @@ export function createApp(options: CreateAppOptions = {}): { app: Express; conta
   app.use("/api/ranking", auth, buildRankingRouter(container));
   app.use("/api/dean", auth, buildDeanRouter(container));
   app.use("/api/ygk", auth, buildIntibakRouter(container));
-  app.use("/api/board", auth, buildBoardRouter(container));
+  // One notification store shared between the read API (bell) and the board
+  // workflow writes — critical under test so the in-memory store is the same
+  // instance for both.
+  const notificationStore = createNotificationStore(container);
+  app.use("/api/notifications", auth, buildNotificationRouter(container, notificationStore));
+  app.use("/api/board", auth, buildBoardRouter(container, notificationStore));
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({ error: "NOT_FOUND" });

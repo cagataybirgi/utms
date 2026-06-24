@@ -1,5 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getActivePeriod, type ActivePeriodDto } from '../lib/api/document-upload';
+import {
+  listNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  relativeTime,
+  toneFor,
+  type NotificationTone,
+} from '../lib/api/notifications';
 import { ProfileSettings } from './ProfileSettings';
 import { Badge } from './ui/badge';
 import {
@@ -30,43 +38,8 @@ interface Notification {
   message: string;
   time: string;
   read: boolean;
-  type: 'info' | 'success' | 'warning';
+  type: NotificationTone;
 }
-
-const MOCK_NOTIFICATIONS: Record<UserRole, Notification[]> = {
-  Student: [
-    { id: '1', title: 'Başvuru Güncellendi', message: 'Yatay geçiş başvurunuz ön inceleme aşamasına geçti.', time: '5 dk önce', read: false, type: 'info' },
-    { id: '2', title: 'Belge Onaylandı', message: 'Yüklediğiniz transkript belgesi onaylandı.', time: '2 saat önce', read: false, type: 'success' },
-    { id: '3', title: 'Eksik Belge', message: 'Başvurunuz için dil yeterlilik belgesi gereklidir.', time: '1 gün önce', read: true, type: 'warning' },
-  ],
-  OIDB: [
-    { id: '1', title: 'Yeni Başvuru', message: '3 yeni yatay geçiş başvurusu inceleme bekliyor.', time: '10 dk önce', read: false, type: 'info' },
-    { id: '2', title: 'İtiraz Alındı', message: 'Ahmet Yılmaz başvuru sonucuna itiraz etti.', time: '1 saat önce', read: false, type: 'warning' },
-    { id: '3', title: 'Dönem Hatırlatma', message: 'Başvuru değerlendirme süresi 3 gün sonra sona eriyor.', time: '3 saat önce', read: true, type: 'warning' },
-  ],
-  YDYO: [
-    { id: '1', title: 'Dil Değerlendirmesi', message: '2 yeni dil yeterlilik değerlendirmesi bekliyor.', time: '15 dk önce', read: false, type: 'info' },
-    { id: '2', title: 'Değerlendirme Tamamlandı', message: 'Fatma Şahin dil değerlendirmesi tamamlandı.', time: '4 saat önce', read: true, type: 'success' },
-  ],
-  YGK: [
-    { id: '1', title: 'Yeni Paket', message: 'OIDB\'den 5 başvuruluk yeni değerlendirme paketi geldi.', time: '30 dk önce', read: false, type: 'info' },
-    { id: '2', title: 'İntibak Onayı', message: 'Bilgisayar Mühendisliği intibak tablosu onaylandı.', time: '2 saat önce', read: false, type: 'success' },
-    { id: '3', title: 'Sıralama Güncellendi', message: 'Elektrik-Elektronik bölümü sıralaması güncellendi.', time: '1 gün önce', read: true, type: 'info' },
-  ],
-  Dean: [
-    { id: '1', title: 'Onay Bekliyor', message: '2 aday paketi dekanlık onayı bekliyor.', time: '1 saat önce', read: false, type: 'info' },
-    { id: '2', title: 'Kurul Bildirimi', message: 'Yönetim kurulu toplantısı 15 Ocak\'ta planlandı.', time: '5 saat önce', read: true, type: 'info' },
-  ],
-  Board: [
-    { id: '1', title: 'Nihai Onay', message: '1 aday paketi nihai kurul onayı bekliyor.', time: '2 saat önce', read: false, type: 'info' },
-    { id: '2', title: 'Karar Kaydedildi', message: 'Önceki toplantı kararları sisteme işlendi.', time: '1 gün önce', read: true, type: 'success' },
-  ],
-  Admin: [
-    { id: '1', title: 'Sistem Uyarısı', message: 'YÖKSİS entegrasyonunda bağlantı zaman aşımı tespit edildi.', time: '5 dk önce', read: false, type: 'warning' },
-    { id: '2', title: 'Yeni Kullanıcı', message: '2 yeni personel hesabı oluşturuldu.', time: '3 saat önce', read: false, type: 'info' },
-    { id: '3', title: 'Yedekleme Tamamlandı', message: 'Günlük veritabanı yedeği başarıyla alındı.', time: '6 saat önce', read: true, type: 'success' },
-  ],
-};
 
 interface AppShellProps {
   user: User;
@@ -121,7 +94,7 @@ export function AppShell({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>(MOCK_NOTIFICATIONS[currentRole] || []);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [activePeriod, setActivePeriod] = useState<ActivePeriodDto | null>(null);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [localDisplayName, setLocalDisplayName] = useState(`${user.name} ${user.surname}`);
@@ -131,14 +104,50 @@ export function AppShell({
     getActivePeriod().then(setActivePeriod).catch(() => {});
   }, []);
 
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await listNotifications(user.id);
+      setNotifications(
+        res.items.map((n) => ({
+          id: n.notificationId,
+          title: n.subject,
+          message: n.body,
+          time: relativeTime(n.createdAt),
+          read: n.isRead,
+          type: toneFor(n.eventType),
+        })),
+      );
+    } catch {
+      setNotifications([]);
+    }
+  }, [user.id]);
+
+  // Initial load + light polling so workflow events (board publish, etc.)
+  // surface without a manual refresh.
+  useEffect(() => {
+    void fetchNotifications();
+    const interval = setInterval(() => void fetchNotifications(), 30000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAsRead = (id: string) => {
+  const markAsRead = async (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    try {
+      await markNotificationRead(id, user.id);
+    } catch {
+      void fetchNotifications();
+    }
   };
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try {
+      await markAllNotificationsRead(user.id);
+    } catch {
+      void fetchNotifications();
+    }
   };
 
   const getNotificationIcon = (type: Notification['type']) => {
@@ -235,7 +244,12 @@ export function AppShell({
             {/* Notifications */}
             <div className="relative">
               <button
-                onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false); }}
+                onClick={() => {
+                  const opening = !showNotifications;
+                  setShowNotifications(opening);
+                  setShowUserMenu(false);
+                  if (opening) void fetchNotifications();
+                }}
                 className="relative p-2 text-gray-400 hover:text-[#C00000] hover:bg-red-50 rounded-lg transition-all"
               >
                 <Bell className="w-5 h-5" />

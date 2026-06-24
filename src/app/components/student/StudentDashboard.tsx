@@ -253,6 +253,7 @@ export function StudentDashboard({ user, onLogout, onSwitchRole }: StudentDashbo
           </Button>
           <FinalResult
             applicationId={selectedAppId}
+            userId={user.id}
             onAppeal={() => setCurrentView('submit-appeal')}
             onBack={() => {
               setCurrentView('dashboard');
