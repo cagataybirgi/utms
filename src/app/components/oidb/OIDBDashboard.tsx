@@ -18,6 +18,9 @@ import {
   ArrowLeft,
   RefreshCw,
   Send,
+  ZoomIn,
+  ZoomOut,
+  Download,
 } from 'lucide-react';
 import type { User } from '../../App';
 import { ReviewAppeals } from './ReviewAppeals';
@@ -340,6 +343,28 @@ interface DetailPanelProps {
   onBack: () => void;
 }
 
+// e-Devlet verification is mocked: every uploaded document reports back as
+// "Doğrulandı". The real verification handshake is out of scope here.
+interface ReviewDocument {
+  slot: DocumentSlot;
+  size: string;
+}
+
+function buildReviewDocuments(app: OidbApplication): ReviewDocument[] {
+  const docs: ReviewDocument[] = [
+    { slot: 'TRANSCRIPT', size: '2.4 MB' },
+    { slot: 'YKS_RESULT', size: '1.8 MB' },
+    { slot: 'STUDENT_CERTIFICATE', size: '1.2 MB' },
+    { slot: 'CURRICULUM', size: '3.2 MB' },
+    { slot: 'COURSE_CONTENTS', size: '5.6 MB' },
+  ];
+  // Students claiming a language exemption don't upload a language proof.
+  if (!app.ydyoExempt) {
+    docs.push({ slot: 'LANGUAGE_PROOF', size: '2.1 MB' });
+  }
+  return docs;
+}
+
 function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -351,6 +376,10 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
 
   const [showReject, setShowReject] = useState(false);
   const [justification, setJustification] = useState('');
+
+  const documents = buildReviewDocuments(app);
+  const [selectedSlot, setSelectedSlot] = useState<DocumentSlot>(documents[0].slot);
+  const selectedDoc = documents.find((d) => d.slot === selectedSlot) ?? documents[0];
 
   const inPool =
     app.currentStatus === 'PENDING_OIDB_VERIFICATION' ||
@@ -374,6 +403,13 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
     }
   };
 
+  // Pre-select the document slot in the return form when the officer clicks a
+  // specific document in the checklist.
+  const selectDocument = (slot: DocumentSlot) => {
+    setSelectedSlot(slot);
+    setReturnSlot(slot);
+  };
+
   return (
     <div className="space-y-4">
       <Button variant="ghost" onClick={onBack} className="mb-2">
@@ -381,42 +417,16 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
         Kuyruğa Dön
       </Button>
 
+      {/* Header + actions */}
       <Card className="p-6 space-y-4">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-gray-900">{app.studentFullName}</h2>
+            <h1 className="text-gray-900">Başvuru Ön İnceleme ve Doğrulama</h1>
             <p className="text-xs text-gray-500">
-              ID: {app.applicationId} • TCKN: {maskTckn(app.studentTckn)}
+              ID: {app.applicationId} • Öğrenci: {app.studentFullName} • TCKN: {maskTckn(app.studentTckn)}
             </p>
           </div>
           {statusBadge(app.currentStatus)}
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-          <div>
-            <div className="text-gray-500">Program</div>
-            <div className="text-gray-900">{departmentLabel(app.targetDepartmentId)}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">Fakülte</div>
-            <div className="text-gray-900">{facultyLabel(app.targetFacultyId)}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">Yarıyıl</div>
-            <div className="text-gray-900">{app.targetSemester}. yarıyıl</div>
-          </div>
-          <div>
-            <div className="text-gray-500">GNO</div>
-            <div className="text-gray-900">{app.submittedGpa}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">YKS Puanı</div>
-            <div className="text-gray-900">{app.submittedYksScore ?? '—'}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">Başvuru Tarihi</div>
-            <div className="text-gray-900">{formatDate(app.submittedAt)}</div>
-          </div>
         </div>
 
         {app.rejectionReason && (
@@ -434,7 +444,7 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
 
         {/* Actions for pool applications */}
         {inPool && (
-          <div className="flex flex-wrap gap-3 pt-2">
+          <div className="flex flex-wrap gap-3">
             <Button onClick={() => run(() => oidbApi.verify(app.applicationId, userId))} disabled={busy}>
               <CheckCircle2 className="w-4 h-4 mr-2" />
               Doğrula (Onayla)
@@ -501,7 +511,7 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
 
         {/* Forward actions once verified */}
         {isVerified && (
-          <div className="space-y-3 pt-2">
+          <div className="space-y-3">
             <div className="text-sm text-gray-700">Başvuru onaylandı. Yönlendirme seçin:</div>
             <div className="flex flex-wrap gap-3">
               <Button onClick={() => run(() => oidbApi.forward(app.applicationId, false, userId))} disabled={busy}>
@@ -517,11 +527,157 @@ function OidbDetailPanel({ app, userId, onUpdated, onBack }: DetailPanelProps) {
         )}
 
         {!inPool && !isVerified && (
-          <div className="text-sm text-gray-500 pt-2">
+          <div className="text-sm text-gray-500">
             Bu başvuru için ÖİDB aşamasında yapılabilecek işlem yok (durum: {STATUS_LABELS[app.currentStatus] ?? app.currentStatus}).
           </div>
         )}
       </Card>
+
+      {/* Side-by-side: form data + document viewer */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Left: application data + document checklist */}
+        <div className="space-y-4">
+          <Card className="p-4">
+            <h3 className="text-sm font-bold mb-3 border-b pb-2">Öğrenci Bilgileri</h3>
+            <div className="grid grid-cols-2 gap-y-3 text-xs">
+              <div>
+                <div className="text-gray-500">Ad Soyad</div>
+                <div className="font-medium">{app.studentFullName}</div>
+              </div>
+              <div>
+                <div className="text-gray-500">TCKN</div>
+                <div className="font-medium text-[#C00000]">{maskTckn(app.studentTckn)}</div>
+              </div>
+              <div>
+                <div className="text-gray-500">GNO (GPA)</div>
+                <div className="font-medium">{app.submittedGpa}</div>
+              </div>
+              <div>
+                <div className="text-gray-500">Başvuru Tarihi</div>
+                <div className="font-medium">{formatDate(app.submittedAt)}</div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <h3 className="text-sm font-bold mb-3 border-b pb-2">Akademik Detaylar</h3>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Mevcut Üniversite</span>
+                <span className="font-medium">{app.currentInstitution ?? '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Mevcut Program</span>
+                <span className="font-medium">{app.currentDepartment ?? '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Hedef Program</span>
+                <span className="font-bold text-blue-700">{departmentLabel(app.targetDepartmentId)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Hedef Fakülte</span>
+                <span className="font-medium">{facultyLabel(app.targetFacultyId)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Yarıyıl</span>
+                <span className="font-medium">{app.targetSemester}. yarıyıl</span>
+              </div>
+              <div className="flex justify-between border-t pt-2">
+                <span className="text-gray-500">YKS Puanı{app.yksExamYear ? ` (${app.yksExamYear})` : ''}</span>
+                <span className="font-bold">{app.submittedYksScore ?? '—'}</span>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <h3 className="text-sm font-bold mb-3 border-b pb-2">Belge Kontrol Listesi</h3>
+            <div className="space-y-2">
+              {documents.map((doc) => {
+                const active = selectedSlot === doc.slot;
+                return (
+                  <div
+                    key={doc.slot}
+                    className={`p-2 rounded-lg border cursor-pointer transition-colors ${active ? 'border-[#C00000] bg-red-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                    onClick={() => selectDocument(doc.slot)}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center space-x-2">
+                        <FileText className={`w-4 h-4 ${active ? 'text-[#C00000]' : 'text-gray-400'}`} />
+                        <span className="text-[11px] font-medium">{DOCUMENT_SLOT_LABELS[doc.slot]}</span>
+                      </div>
+                      <Badge className="bg-green-600 hover:bg-green-700 text-white border-none text-[10px]">
+                        e-Devlet: Doğrulandı
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-gray-500">
+                      <span>Boyut: {doc.size}</span>
+                      <span className="flex items-center italic">
+                        <CheckCircle2 className="w-3 h-3 mr-1 text-green-600" />
+                        Doğrulandı
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+
+        {/* Right: document viewer */}
+        <Card className="flex flex-col overflow-hidden p-0 min-h-[480px]">
+          <div className="bg-gray-800 text-white p-2 text-xs flex justify-between items-center shrink-0">
+            <span>Görüntülenen: {DOCUMENT_SLOT_LABELS[selectedDoc.slot]}</span>
+            <div className="flex space-x-2">
+              <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2"><ZoomIn className="w-3 h-3 mr-1" />Yakınlaştır</Button>
+              <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2"><ZoomOut className="w-3 h-3 mr-1" />Uzaklaştır</Button>
+              <Button variant="secondary" size="sm" className="h-6 text-[10px] py-0 px-2"><Download className="w-3 h-3 mr-1" />İndir</Button>
+            </div>
+          </div>
+          <div className="flex-1 flex items-center justify-center p-6 bg-gray-200 overflow-auto">
+            <div className="w-full max-w-[460px] aspect-[1/1.414] bg-white shadow-2xl flex flex-col p-8 shrink-0">
+              <div className="border-b-2 border-gray-900 pb-3 mb-6 flex justify-between items-start">
+                <div>
+                  <h2 className="text-base font-serif font-bold uppercase">{DOCUMENT_SLOT_LABELS[selectedDoc.slot]}</h2>
+                  <p className="text-[11px] font-serif">Üniversite Transfer Başvuru Belgesi</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-serif font-bold">TARİH: {formatDate(app.submittedAt)}</p>
+                  <p className="text-[10px] font-serif font-bold">BAŞVURU: {app.applicationId}</p>
+                </div>
+              </div>
+              <div className="flex-1 space-y-5">
+                <div className="h-3 bg-gray-100 w-3/4" />
+                <div className="h-3 bg-gray-100 w-1/2" />
+                <div className="h-24 bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 font-serif italic text-xs text-center px-2">
+                  {DOCUMENT_SLOT_LABELS[selectedDoc.slot]} için belge önizleme içeriği
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="h-2.5 bg-gray-100 w-full" />
+                    <div className="h-2.5 bg-gray-100 w-full" />
+                    <div className="h-2.5 bg-gray-100 w-full" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-2.5 bg-gray-100 w-full" />
+                    <div className="h-2.5 bg-gray-100 w-full" />
+                    <div className="h-2.5 bg-gray-100 w-full" />
+                  </div>
+                </div>
+                <div className="flex justify-end pt-4">
+                  <div className="w-24 h-24 border-2 border-blue-900 rounded-full flex items-center justify-center border-double rotate-12">
+                    <div className="text-center text-blue-900 font-bold text-[9px] leading-tight">
+                      e-DEVLET<br />DOĞRULANDI<br />{formatDate(app.submittedAt)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-auto pt-4 border-t border-gray-200 text-[8px] text-gray-400 uppercase tracking-widest text-center">
+                Bu belge güvenli bağlantı üzerinden merkezi üniversite yönetim sisteminden çekilmiştir.
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

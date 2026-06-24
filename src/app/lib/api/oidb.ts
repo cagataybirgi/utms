@@ -98,9 +98,14 @@ export interface OidbApplication {
   targetSemester: number;
   submittedGpa: number;
   submittedYksScore?: number;
+  yksExamYear?: number;
+  language?: string;
+  currentInstitution?: string;
+  currentDepartment?: string;
   currentStatus: string;
   submittedAt: string;
   rejectionReason?: string;
+  correctionReasons?: CorrectionReason[];
   ydyoExempt: boolean;
 }
 
